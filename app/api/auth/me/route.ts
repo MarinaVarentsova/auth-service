@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { verifyAccessToken } from "@/lib/jwt";
-import { prisma } from "@/lib/prisma";
+import { verifyAccessToken } from "../../../../lib/jwt";
+import { prisma } from "../../../../lib/prisma";
 
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
