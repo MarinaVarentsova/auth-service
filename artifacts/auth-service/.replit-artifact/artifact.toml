@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Auth Service"
+version = "1.0.0"
+id = "artifacts/auth-service"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18089
+
+[services.development]
+run = "pnpm --filter @workspace/auth-service run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/auth-service", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/auth-service/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18089"
+BASE_PATH = "/"
