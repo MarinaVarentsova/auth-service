@@ -1,0 +1,178 @@
+Работай ТОЛЬКО в текущем репозитории GitHub:
+
+MarinaVarentsova/auth-service
+
+Это Next.js-приложение. Production запускается из корня репозитория командой:
+
+HOSTNAME=0.0.0.0 PORT=3000 node .next/standalone/server.js
+
+НЕ трогай:
+- Start Command;
+- Base Directory;
+- next.config.js;
+- Docker/Coolify-конфигурацию;
+- существующую логику авторизации администратора.
+
+В этом репозитории НЕТ рабочего приложения в:
+artifacts/api-server
+
+Не создавай эту папку и не изменяй несуществующие файлы:
+- artifacts/api-server/src/routes/auth.ts
+- artifacts/api-server/src/lib/email.ts
+
+Фактический маршрут регистрации находится в:
+
+app/api/auth/register/route.ts
+
+Фактическая интеграция UniSender находится в:
+
+lib/unisender.ts
+
+Текущая проблема:
+
+1. POST /api/auth/register создаёт пользователя в auth_users.
+2. Создаётся пользователь со статусом ожидания подтверждения.
+3. Письмо не приходит.
+4. API возвращает 502:
+   "Пользователь создан, но письмо подтверждения не отправлено".
+5. Созданный пользователь остаётся в БД.
+
+Нужно провести аудит реального кода текущего репозитория и исправить проблему.
+
+ШАГ 1. Найди точную строку во всём текущем репозитории:
+
+"Пользователь создан, но письмо подтверждения не отправлено"
+
+Покажи точный файл и строку.
+
+ШАГ 2. Открой и проанализируй:
+
+- app/api/auth/register/route.ts
+- lib/unisender.ts
+- app/api/auth/verify/route.ts
+- prisma/schema.prisma
+- package.json
+- next.config.js
+
+ШАГ 3. Проверь реальный вызов отправки письма:
+
+- импортируется ли sendVerificationEmail;
+- вызывается ли он после создания verification token;
+- какой verificationUrl формируется;
+- какие переменные окружения используются;
+- какое исключение приводит к 502.
+
+ШАГ 4. В lib/unisender.ts поддержи оба возможных успешных ответа UniSender.
+
+Вариант 1:
+
+{
+  "result": [
+    {
+      "id": "message-id",
+      "email": "user@example.com"
+    }
+  ]
+}
+
+Вариант 2:
+
+{
+  "result": {
+    "email_id": 14362456134
+  }
+}
+
+email_id может быть string или number.
+
+Не считать успешный object-ответ ошибкой.
+
+ШАГ 5. Добавь безопасное серверное логирование:
+
+[AUTH-REGISTER] BUILD_MARKER_AUTH_SERVICE_V3
+[AUTH-REGISTER] user created
+[AUTH-REGISTER] verification token created
+[EMAIL] verification request started
+[EMAIL] verification response
+[EMAIL] verification accepted
+[EMAIL] verification failed
+[AUTH-REGISTER] rollback completed
+[AUTH-REGISTER] rollback failed
+
+В ответе UniSender логировать:
+
+- HTTP status;
+- data.error;
+- data.code;
+- resultFormat: array, object или unknown;
+- наличие message id;
+- замаскированный email.
+
+Никогда не логировать:
+
+- UNISENDER_API_KEY;
+- пароль;
+- полный verification token;
+- полный verificationUrl с токеном.
+
+ШАГ 6. Исправь rollback.
+
+Если пользователь и verification token были созданы в рамках текущего POST-запроса, но sendVerificationEmail завершился ошибкой:
+
+1. удалить созданный verification token;
+2. удалить только созданного в этом запросе пользователя;
+3. не удалять ранее существующие записи;
+4. не оставлять email заблокированным для повторной регистрации.
+
+Не держать транзакцию базы открытой во время HTTP-запроса к UniSender.
+
+При ошибке отправки вернуть:
+
+HTTP 502
+
+{
+  "message": "Не удалось отправить письмо подтверждения. Попробуйте зарегистрироваться ещё раз.",
+  "buildMarker": "auth-service-v3"
+}
+
+Поле buildMarker временное, нужно для проверки, что production действительно запустил новую версию.
+
+ШАГ 7. Проверь переменные текущего кода:
+
+- UNISENDER_API_KEY
+- UNISENDER_LIST_ID
+- UNISENDER_FROM_EMAIL
+- UNISENDER_FROM_NAME
+- AUTH_URL
+- APP_URL
+- DATABASE_URL
+- AUTH_SECRET
+
+Не меняй AUTH_URL на APP_URL автоматически.
+
+Сначала установи по существующему коду:
+
+- какой URL должен вести на /api/auth/verify;
+- какой URL используется для редиректа после подтверждения.
+
+ШАГ 8. Проверь, что lib/unisender.ts, который находится сейчас в репозитории, действительно импортируется в register/route.ts, а не является неиспользуемым файлом.
+
+ШАГ 9. После исправления выполни:
+
+- npm run build;
+- npx prisma validate;
+- npm run typecheck, только если такой script существует.
+
+ШАГ 10. Покажи в отчёте только факты:
+
+1. В каком реальном файле находился старый текст ошибки.
+2. Какая точная причина приводила к 502.
+3. Какой формат ответа UniSender поддерживал код до исправления.
+4. Какие реальные файлы текущего репозитория изменены.
+5. Как выполнен rollback.
+6. Результат build и prisma validate.
+7. Git diff.
+8. Создан ли commit и отправлен ли он в ветку main.
+9. Последний commit SHA.
+
+Не утверждай, что изменены файлы artifacts/api-server — их нет в production-архитектуре этого репозитория.
