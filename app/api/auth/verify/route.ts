@@ -19,7 +19,11 @@ export async function GET(req: Request) {
     );
   }
 
-  const failUrl = `${appUrl}/login?emailVerified=0&reason=invalid_token`;
+  const failParams = new URLSearchParams({
+    emailVerified: "0",
+    reason: "invalid_token",
+  });
+  const failUrl = `${appUrl}/login?${failParams.toString()}`;
 
   if (!token) {
     console.warn("[AUTH-VERIFY] verification failed — no token in request");
@@ -47,13 +51,14 @@ export async function GET(req: Request) {
 
   console.info("[AUTH-VERIFY] token accepted", { userId: verify.userId });
 
-  // Все DB-операции завершаются до redirect
-  await prisma.user.update({
+  // Активируем пользователя и получаем его email одним запросом
+  const user = await prisma.user.update({
     where: { id: verify.userId },
     data: {
       emailVerified: true,
       status: "active",
     },
+    select: { email: true },
   });
 
   await prisma.verificationToken.update({
@@ -63,11 +68,13 @@ export async function GET(req: Request) {
 
   console.info("[AUTH-VERIFY] user activated", { userId: verify.userId });
 
-  const successUrl = `${appUrl}/login?emailVerified=1`;
-
-  console.info("[AUTH-VERIFY] redirecting to login", {
-    userId: verify.userId,
+  const successParams = new URLSearchParams({
+    emailVerified: "1",
+    email: user.email,
   });
+  const successUrl = `${appUrl}/login?${successParams.toString()}`;
+
+  console.info("[AUTH-VERIFY] redirecting to login", { userId: verify.userId });
 
   return NextResponse.redirect(successUrl, { status: 302 });
 }
