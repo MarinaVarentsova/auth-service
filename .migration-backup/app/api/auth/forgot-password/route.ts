@@ -32,8 +32,8 @@ export async function POST(req: Request) {
     message: "Если пользователь существует, письмо отправлено.",
   });
 
-  const user = await prisma.user.findUnique({
-    where: { projectId_email: { projectId: project.id, email } },
+  const user = await prisma.user.findFirst({
+    where: { projectId: project.id, email },
   });
 
   if (!user) {
