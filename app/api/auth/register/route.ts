@@ -5,6 +5,8 @@ import { prisma } from "../../../../lib/prisma";
 import { sendVerificationEmail } from "../../../../lib/unisender";
 
 export async function POST(req: Request) {
+  console.info("[AUTH-REGISTER] BUILD_MARKER_AUTH_SERVICE_V3");
+
   try {
     const { project_code, email, password, full_name, phone } =
       await req.json();
@@ -65,6 +67,9 @@ export async function POST(req: Request) {
       .update(rawToken)
       .digest("hex");
 
+    // Создаём пользователя отдельно от токена — чтобы знать точно,
+    // что именно было создано в этом запросе при rollback.
+    // DB-транзакция закрыта до HTTP-запроса к UniSender.
     const user = await prisma.user.create({
       data: {
         projectId: project.id,
@@ -74,27 +79,35 @@ export async function POST(req: Request) {
         passwordHash,
         status: "pending_email",
         emailVerified: false,
-        verificationTokens: {
-          create: {
-            projectId: project.id,
-            tokenHash,
-            expiresAt: new Date(
-              Date.now() + 1000 * 60 * 60 * 24
-            ),
-          },
-        },
       },
+    });
+
+    console.info("[AUTH-REGISTER] user created", { userId: user.id });
+
+    const verificationToken = await prisma.verificationToken.create({
+      data: {
+        projectId: project.id,
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      },
+    });
+
+    console.info("[AUTH-REGISTER] verification token created", {
+      userId: user.id,
+      tokenId: verificationToken.id,
     });
 
     const authPublicUrl =
       process.env.AUTH_PUBLIC_URL ||
       new URL(req.url).origin;
 
+    // verificationUrl намеренно не логируется — содержит rawToken
     const verificationUrl =
       `${authPublicUrl}/api/auth/verify` +
       `?token=${encodeURIComponent(rawToken)}`;
 
-    console.info("[EMAIL] verification start", {
+    console.info("[EMAIL] verification request started", {
       userId: user.id,
     });
 
@@ -104,11 +117,11 @@ export async function POST(req: Request) {
         verificationUrl,
       });
 
-      console.info("[EMAIL] verification success", {
+      console.info("[EMAIL] verification accepted", {
         userId: user.id,
       });
     } catch (emailError) {
-      console.error("[EMAIL] verification error", {
+      console.error("[EMAIL] verification failed", {
         userId: user.id,
         message:
           emailError instanceof Error
@@ -116,15 +129,34 @@ export async function POST(req: Request) {
             : "Unknown email error",
       });
 
+      // Компенсирующий откат: удаляем только записи, созданные в этом запросе
+      try {
+        await prisma.verificationToken.delete({
+          where: { id: verificationToken.id },
+        });
+        await prisma.user.delete({
+          where: { id: user.id },
+        });
+        console.info("[AUTH-REGISTER] rollback completed", {
+          userId: user.id,
+          tokenId: verificationToken.id,
+        });
+      } catch (rollbackError) {
+        console.error("[AUTH-REGISTER] rollback failed", {
+          userId: user.id,
+          tokenId: verificationToken.id,
+          message:
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : "Unknown rollback error",
+        });
+      }
+
       return NextResponse.json(
         {
-          success: false,
-          error:
-            "Пользователь создан, но письмо подтверждения не отправлено",
-          user_id: user.id,
-          project_id: project.id,
-          status: user.status,
-          email_verified: user.emailVerified,
+          message:
+            "Не удалось отправить письмо подтверждения. Попробуйте зарегистрироваться ещё раз.",
+          buildMarker: "auth-service-v3",
         },
         { status: 502 }
       );

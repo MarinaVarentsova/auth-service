@@ -15,8 +15,13 @@ type UniSenderRecipientResult = {
   }>;
 };
 
+// UniSender sendEmail возвращает один из двух успешных форматов:
+//   Новый (error_checking=1): { result: [{ id: "msg-id", email: "..." }] }
+//   Старый (compat):          { result: { email_id: 14362456134 } }
 type UniSenderResponse = {
-  result?: UniSenderRecipientResult[];
+  result?:
+    | UniSenderRecipientResult[]
+    | { email_id?: string | number };
   error?: string;
   code?: string;
 };
@@ -28,6 +33,14 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function maskEmail(email: string): string {
+  const atIdx = email.indexOf("@");
+  if (atIdx < 0) return "***";
+  const local = email.slice(0, atIdx);
+  const domain = email.slice(atIdx + 1);
+  return `${local.slice(0, Math.min(2, local.length))}***@${domain}`;
 }
 
 export async function sendEmail({
@@ -44,11 +57,11 @@ export async function sendEmail({
   const listId = process.env.UNISENDER_LIST_ID;
 
   if (!apiKey) {
-    throw new Error("UNISENDER_API_KEY is not configured");
+    throw new Error("CONFIG_ERROR: UNISENDER_API_KEY is not configured");
   }
 
   if (!listId) {
-    throw new Error("UNISENDER_LIST_ID is not configured");
+    throw new Error("CONFIG_ERROR: UNISENDER_LIST_ID is not configured");
   }
 
   const form = new URLSearchParams({
@@ -65,7 +78,10 @@ export async function sendEmail({
     track_links: "0",
   });
 
+  const maskedTo = maskEmail(to);
+
   console.info(`[EMAIL] ${emailType} start`, {
+    to: maskedTo,
     recipientDomain: to.split("@")[1] || "unknown",
   });
 
@@ -92,6 +108,7 @@ export async function sendEmail({
       httpStatus: response.status,
       reason: "INVALID_JSON_RESPONSE",
       responsePreview: rawText.slice(0, 300),
+      to: maskedTo,
     });
 
     throw new Error("UniSender returned invalid JSON");
@@ -102,6 +119,7 @@ export async function sendEmail({
       httpStatus: response.status,
       code: data.code,
       error: data.error,
+      to: maskedTo,
     });
 
     throw new Error(
@@ -114,50 +132,110 @@ export async function sendEmail({
       httpStatus: response.status,
       code: data.code,
       error: data.error,
+      to: maskedTo,
     });
 
-    throw new Error(`UniSender error: ${data.error}`);
+    throw new Error(`UniSender error [${data.code ?? "?"}]: ${data.error}`);
   }
 
-  const recipientResult = data.result?.[0];
+  // Определяем формат ответа и логируем
+  const resultFormat = Array.isArray(data.result)
+    ? "array"
+    : data.result && typeof data.result === "object"
+    ? "object"
+    : "none";
 
-  if (!recipientResult) {
-    console.error(`[EMAIL] ${emailType} error`, {
-      httpStatus: response.status,
-      reason: "EMPTY_RESULT",
-    });
-
-    throw new Error("UniSender returned empty result");
-  }
-
-  if (recipientResult.errors?.length) {
-    const errorMessage = recipientResult.errors
-      .map((item) => item.message || item.code || "Unknown error")
-      .join("; ");
-
-    console.error(`[EMAIL] ${emailType} error`, {
-      httpStatus: response.status,
-      errors: recipientResult.errors,
-    });
-
-    throw new Error(`UniSender rejected email: ${errorMessage}`);
-  }
-
-  if (!recipientResult.id) {
-    console.error(`[EMAIL] ${emailType} error`, {
-      httpStatus: response.status,
-      reason: "EMAIL_ID_MISSING",
-      result: recipientResult,
-    });
-
-    throw new Error("UniSender did not return email id");
-  }
-
-  console.info(`[EMAIL] ${emailType} success`, {
-    emailId: recipientResult.id,
+  console.info(`[EMAIL] verification response`, {
+    httpStatus: response.status,
+    resultFormat,
+    to: maskedTo,
   });
 
-  return recipientResult.id;
+  if (Array.isArray(data.result)) {
+    // Новый формат: result — массив per-recipient статусов
+    const recipientResult = data.result[0] as
+      | UniSenderRecipientResult
+      | undefined;
+
+    if (!recipientResult) {
+      console.error(`[EMAIL] ${emailType} error`, {
+        httpStatus: response.status,
+        reason: "EMPTY_RESULT_ARRAY",
+        resultFormat,
+        to: maskedTo,
+      });
+
+      throw new Error("UniSender returned empty result array");
+    }
+
+    if (recipientResult.errors?.length) {
+      const errorMessage = recipientResult.errors
+        .map((item) => item.message || item.code || "Unknown error")
+        .join("; ");
+
+      console.error(`[EMAIL] ${emailType} error`, {
+        httpStatus: response.status,
+        reason: "RECIPIENT_ERRORS",
+        errors: recipientResult.errors,
+        resultFormat,
+        to: maskedTo,
+      });
+
+      throw new Error(`UniSender rejected recipient: ${errorMessage}`);
+    }
+
+    if (!recipientResult.id) {
+      console.error(`[EMAIL] ${emailType} error`, {
+        httpStatus: response.status,
+        reason: "EMAIL_ID_MISSING",
+        resultFormat,
+        hasId: false,
+        to: maskedTo,
+      });
+
+      throw new Error("UniSender did not return email id (array format)");
+    }
+
+    console.info(`[EMAIL] ${emailType} accepted`, {
+      resultFormat,
+      hasId: true,
+      to: maskedTo,
+    });
+
+    return recipientResult.id;
+  } else if (data.result && typeof data.result === "object") {
+    // Старый compat-формат: result — объект { email_id: number | string }
+    const emailId = (data.result as { email_id?: string | number }).email_id;
+
+    if (emailId === undefined || emailId === null) {
+      console.error(`[EMAIL] ${emailType} error`, {
+        httpStatus: response.status,
+        reason: "EMAIL_ID_MISSING",
+        resultFormat,
+        hasId: false,
+        to: maskedTo,
+      });
+
+      throw new Error("UniSender did not return email_id (legacy object format)");
+    }
+
+    console.info(`[EMAIL] ${emailType} accepted`, {
+      resultFormat,
+      hasId: true,
+      to: maskedTo,
+    });
+
+    return String(emailId);
+  } else {
+    console.error(`[EMAIL] ${emailType} error`, {
+      httpStatus: response.status,
+      reason: "UNKNOWN_RESULT_FORMAT",
+      resultFormat,
+      to: maskedTo,
+    });
+
+    throw new Error("UniSender returned unrecognised result format");
+  }
 }
 
 export async function sendVerificationEmail(params: {
@@ -169,17 +247,14 @@ export async function sendVerificationEmail(params: {
   return sendEmail({
     to: params.to,
     emailType: "verification",
-    subject: "Подтвердите регистрацию на платформе",
+    subject: "Подтверждение регистрации",
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #17213c;">
-        <h2>Подтверждение регистрации</h2>
-
-        <p>Добрый день!</p>
+        <h2>Подтвердите регистрацию</h2>
 
         <p>
           Вы зарегистрировались на платформе судебных экспертов.
-          Чтобы завершить регистрацию и войти в личный кабинет,
-          подтвердите адрес электронной почты.
+          Для активации аккаунта подтвердите адрес электронной почты.
         </p>
 
         <p style="margin: 28px 0;">
@@ -189,13 +264,13 @@ export async function sendVerificationEmail(params: {
               display: inline-block;
               padding: 12px 22px;
               border-radius: 6px;
-              background: #0b3b75;
+              background: #97257f;
               color: #ffffff;
               text-decoration: none;
               font-weight: 700;
             "
           >
-            Подтвердить почту
+            Подтвердить email
           </a>
         </p>
 
@@ -204,13 +279,7 @@ export async function sendVerificationEmail(params: {
         </p>
 
         <p style="font-size: 13px; color: #667085;">
-          Если вы не регистрировались на платформе,
-          просто проигнорируйте это письмо.
-        </p>
-
-        <p>
-          С уважением,<br />
-          Платформа судебных экспертов
+          Если вы не регистрировались на платформе, просто проигнорируйте это письмо.
         </p>
       </div>
     `,
