@@ -8,80 +8,70 @@ datasource db {
 }
 
 model Project {
-  id        String   @id @default(uuid()) @db.Uuid
-  code      String   @unique
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code      String   @unique(map: "auth_projects_code_unique")
   name      String
   isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  users User[]
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  users     User[]
 
   @@map("auth_projects")
 }
 
 model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  projectId     String   @map("project_id") @db.Uuid
-  email         String
-  phone         String?
-  fullName      String   @map("full_name")
-  passwordHash  String   @map("password_hash")
-  status        String   @default("pending_email")
-  emailVerified Boolean  @default(false) @map("email_verified")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  verificationTokens VerificationToken[]
-  refreshTokens      RefreshToken[]
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId           String               @map("project_id") @db.Uuid
+  email               String
+  phone               String?
+  fullName            String               @map("full_name")
+  passwordHash        String               @map("password_hash")
+  status              String               @default("pending_email")
+  emailVerified       Boolean              @default(false) @map("email_verified")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
   passwordResetTokens PasswordResetToken[]
+  refreshTokens       RefreshToken[]
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "auth_users_project_id_auth_projects_id_fk")
+  verificationTokens  VerificationToken[]
 
-  @@unique([projectId, email])
   @@map("auth_users")
 }
 
 model VerificationToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  projectId String   @map("project_id") @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @map("token_hash")
-  expiresAt DateTime @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String    @map("project_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamp(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamp(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "auth_verification_tokens_user_id_auth_users_id_fk")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, tokenHash])
   @@map("auth_verification_tokens")
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  projectId String   @map("project_id") @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @map("token_hash")
-  expiresAt DateTime @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String    @map("project_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamp(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamp(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "auth_refresh_tokens_user_id_auth_users_id_fk")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, tokenHash])
   @@map("auth_refresh_tokens")
 }
 
 model PasswordResetToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  projectId String   @map("project_id") @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  tokenHash String   @map("token_hash")
-  expiresAt DateTime @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String    @map("project_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamp(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamp(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "auth_password_reset_tokens_user_id_auth_users_id_fk")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, tokenHash])
   @@map("auth_password_reset_tokens")
 }
