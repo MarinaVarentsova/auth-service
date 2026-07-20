@@ -37,8 +37,19 @@ export async function GET(req: Request) {
     data: { usedAt: new Date() }
   });
 
-  return NextResponse.json({
-    success: true,
-    message: "Email confirmed"
+  const user = await prisma.user.findUnique({
+    where: { id: verify.userId },
+    select: { email: true }
   });
+
+  const appUrl = process.env.APP_URL;
+  if (!appUrl) {
+    return NextResponse.json({ error: "APP_URL is not configured" }, { status: 500 });
+  }
+
+  const url = new URL("/login", appUrl);
+  url.searchParams.set("emailVerified", "1");
+  url.searchParams.set("email", user!.email);
+
+  return NextResponse.redirect(url);
 }
