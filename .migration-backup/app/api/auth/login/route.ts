@@ -37,12 +37,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const user = await prisma.user.findUnique({
+    const user = await prisma.user.findFirst({
       where: {
-        projectId_email: {
-          projectId: project.id,
-          email
-        }
+        projectId: project.id,
+        email,
       }
     });
 
