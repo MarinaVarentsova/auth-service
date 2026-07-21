@@ -8,7 +8,7 @@ datasource db {
 }
 
 model Project {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   code      String   @unique(map: "auth_projects_code_unique")
   name      String
   isActive  Boolean  @default(true) @map("is_active")
@@ -19,7 +19,7 @@ model Project {
 }
 
 model User {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                  String               @id @default(uuid()) @db.Uuid
   projectId           String               @map("project_id") @db.Uuid
   email               String
   phone               String?
@@ -38,7 +38,7 @@ model User {
 }
 
 model VerificationToken {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
   projectId String    @map("project_id") @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   tokenHash String    @map("token_hash")
@@ -51,7 +51,7 @@ model VerificationToken {
 }
 
 model RefreshToken {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
   projectId String    @map("project_id") @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   tokenHash String    @map("token_hash")
@@ -64,7 +64,7 @@ model RefreshToken {
 }
 
 model PasswordResetToken {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
   projectId String    @map("project_id") @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   tokenHash String    @map("token_hash")
