@@ -11,6 +11,14 @@ export async function POST(req: Request) {
     const { project_code, email, password, full_name, phone } =
       await req.json();
 
+    console.info("[REGISTER PAYLOAD]", {
+      project_code,
+      email,
+      full_name,
+      phone: phone ?? null,
+      // пароль не логируется
+    });
+
     if (!project_code || !email || !password || !full_name) {
       return NextResponse.json(
         {
@@ -172,7 +180,11 @@ export async function POST(req: Request) {
       verification_token: rawToken,
     });
   } catch (error) {
-    console.error("REGISTER_ERROR", error);
+    console.error("[REGISTER ERROR] exception caught", error);
+    if (error instanceof Error) {
+      console.error("[REGISTER ERROR] message:", error.message);
+      console.error("[REGISTER ERROR] stack:", error.stack);
+    }
 
     return NextResponse.json(
       {
