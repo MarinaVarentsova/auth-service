@@ -99,6 +99,9 @@ export async function sendEmail({
 
   const rawText = await response.text();
 
+  console.info("[UNISENDER STATUS]", response.status);
+  console.info("[UNISENDER RESPONSE]", rawText.slice(0, 1000));
+
   let data: UniSenderResponse | null = null;
 
   try {
