@@ -8,14 +8,25 @@ export async function POST(req: Request) {
   console.info("[AUTH-REGISTER] BUILD_MARKER_AUTH_SERVICE_V3");
 
   try {
-    const { project_code, email, password, full_name, phone } =
-      await req.json();
+    const {
+      project_code,
+      email,
+      password,
+      full_name,
+      phone,
+      consent_personal_data,
+      consent_platform_rules,
+      consent_marketing,
+    } = await req.json();
 
     console.info("[REGISTER PAYLOAD]", {
       project_code,
       email,
       full_name,
       phone: phone ?? null,
+      consent_personal_data,
+      consent_platform_rules,
+      consent_marketing,
       // пароль не логируется
     });
 
@@ -25,6 +36,17 @@ export async function POST(req: Request) {
           success: false,
           error:
             "project_code, email, password, full_name обязательны",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!consent_personal_data || !consent_platform_rules) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Необходимо принять обработку персональных данных и правила платформы",
         },
         { status: 400 }
       );
@@ -90,6 +112,41 @@ export async function POST(req: Request) {
 
     console.info("[AUTH-REGISTER] user created", { userId: user.id });
 
+    const now = new Date();
+    await prisma.consent.createMany({
+      data: [
+        {
+          userId: user.id,
+          email,
+          documentType: "personal_data",
+          documentVersion: "1.0",
+          accepted: true,
+          acceptedAt: now,
+        },
+        {
+          userId: user.id,
+          email,
+          documentType: "platform_rules",
+          documentVersion: "1.0",
+          accepted: true,
+          acceptedAt: now,
+        },
+        {
+          userId: user.id,
+          email,
+          documentType: "marketing",
+          documentVersion: "1.0",
+          accepted: !!consent_marketing,
+          acceptedAt: now,
+        },
+      ],
+    });
+
+    console.info("[AUTH-REGISTER] consents saved", {
+      userId: user.id,
+      marketing: !!consent_marketing,
+    });
+
     const verificationToken = await prisma.verificationToken.create({
       data: {
         projectId: project.id,
@@ -140,6 +197,7 @@ export async function POST(req: Request) {
         await prisma.verificationToken.delete({
           where: { id: verificationToken.id },
         });
+        // Согласия удалятся каскадно вместе с пользователем (onDelete: Cascade)
         await prisma.user.delete({
           where: { id: user.id },
         });
