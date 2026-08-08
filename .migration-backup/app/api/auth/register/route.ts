@@ -98,51 +98,53 @@ export async function POST(req: Request) {
     // Создаём пользователя отдельно от токена — чтобы знать точно,
     // что именно было создано в этом запросе при rollback.
     // DB-транзакция закрыта до HTTP-запроса к UniSender.
-    const user = await prisma.user.create({
-      data: {
-        projectId: project.id,
-        email,
-        phone: phone || null,
-        fullName: full_name,
-        passwordHash,
-        status: "pending_email",
-        emailVerified: false,
-      },
-    });
-
-    console.info("[AUTH-REGISTER] user created", { userId: user.id });
-
     const now = new Date();
-    await prisma.consent.createMany({
-      data: [
-        {
-          userId: user.id,
+    const { user } = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          projectId: project.id,
           email,
-          documentType: "personal_data",
-          documentVersion: "1.0",
-          accepted: true,
-          acceptedAt: now,
+          phone: phone || null,
+          fullName: full_name,
+          passwordHash,
+          status: "pending_email",
+          emailVerified: false,
         },
-        {
-          userId: user.id,
-          email,
-          documentType: "platform_rules",
-          documentVersion: "1.0",
-          accepted: true,
-          acceptedAt: now,
-        },
-        {
-          userId: user.id,
-          email,
-          documentType: "marketing",
-          documentVersion: "1.0",
-          accepted: !!consent_marketing,
-          acceptedAt: now,
-        },
-      ],
+      });
+
+      await tx.consent.createMany({
+        data: [
+          {
+            userId: user.id,
+            email,
+            documentType: "personal_data",
+            documentVersion: "1.0",
+            accepted: true,
+            acceptedAt: now,
+          },
+          {
+            userId: user.id,
+            email,
+            documentType: "platform_rules",
+            documentVersion: "1.0",
+            accepted: true,
+            acceptedAt: now,
+          },
+          {
+            userId: user.id,
+            email,
+            documentType: "marketing",
+            documentVersion: "1.0",
+            accepted: !!consent_marketing,
+            acceptedAt: now,
+          },
+        ],
+      });
+
+      return { user };
     });
 
-    console.info("[AUTH-REGISTER] consents saved", {
+    console.info("[AUTH-REGISTER] user and consents saved in transaction", {
       userId: user.id,
       marketing: !!consent_marketing,
     });

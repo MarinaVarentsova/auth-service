@@ -84,9 +84,9 @@ model Consent {
   documentType    String    @map("document_type")
   documentVersion String    @default("1.0") @map("document_version")
   accepted        Boolean
-  acceptedAt      DateTime  @map("accepted_at") @db.Timestamp(6)
-  revokedAt       DateTime? @map("revoked_at") @db.Timestamp(6)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  acceptedAt      DateTime  @map("accepted_at") @db.Timestamptz(6)
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("auth_consents")
