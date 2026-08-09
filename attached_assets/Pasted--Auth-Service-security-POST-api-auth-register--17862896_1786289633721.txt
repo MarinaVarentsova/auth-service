@@ -1,0 +1,286 @@
+Работаем ТОЛЬКО в Auth Service.
+
+Исправляем ОДНУ security-проблему:
+
+POST /api/auth/register сейчас возвращает raw verification token
+в HTTP response после успешной регистрации.
+
+Нужно удалить verification token из клиентского response,
+НЕ сломав существующий registration / verify flow.
+
+ВАЖНО:
+
+НЕ проводить дополнительный аудит.
+Сразу определить текущую реализацию → исправить → проверить → вернуть итог.
+
+НЕ менять:
+- регистрацию пользователя;
+- auth_users;
+- auth_consents;
+- Prisma;
+- БД/schema;
+- transaction;
+- password hashing;
+- verification token generation;
+- token hashing;
+- запись verification token в БД;
+- verification email;
+- ссылку подтверждения email;
+- /api/auth/verify;
+- login;
+- reset-password;
+- JWT;
+- AUTH_SECRET;
+- UniSender;
+- frontend, если он не использует это поле;
+- другие security-проблемы.
+
+НЕ делать commit.
+НЕ делать push.
+НЕ делать deploy.
+
+
+==================================================
+1. НАЙТИ ТЕКУЩУЮ ЛОГИКУ REGISTER
+==================================================
+
+Найти фактический:
+
+POST /api/auth/register
+
+и определить:
+
+- где создаётся raw verification token;
+- где создаётся hash token;
+- где token записывается в БД;
+- где raw token используется для verification email;
+- где raw verification token попадает в HTTP response.
+
+После этого сразу выполнить исправление.
+
+
+==================================================
+2. RAW TOKEN ОСТАЁТСЯ SERVER-SIDE
+==================================================
+
+Raw verification token должен продолжать использоваться:
+
+server-side
+→ формирование verification URL
+→ отправка email.
+
+Не менять:
+- формат token;
+- длину;
+- генерацию;
+- hash;
+- TTL;
+- verification URL;
+- email template;
+- verify endpoint.
+
+
+==================================================
+3. УБРАТЬ TOKEN ИЗ HTTP RESPONSE
+==================================================
+
+После успешной регистрации HTTP response
+НЕ должен содержать:
+
+verification_token
+rawToken
+token
+verificationUrl
+
+или другое поле,
+через которое browser получает secret verification token.
+
+Сохранить все остальные существующие поля успешного response,
+которые реально нужны frontend.
+
+Например, если сейчас response содержит:
+
+{
+  success,
+  user_id,
+  project_id,
+  status,
+  verification_token
+}
+
+то должно стать:
+
+{
+  success,
+  user_id,
+  project_id,
+  status
+}
+
+Не менять значения остальных полей.
+
+
+==================================================
+4. ПРОВЕРИТЬ FRONTEND DEPENDENCY
+==================================================
+
+Проверить весь текущий frontend,
+используется ли response.verification_token
+после регистрации.
+
+Если НЕ используется:
+ничего во frontend не менять.
+
+Если используется:
+не возвращать raw token обратно ради совместимости.
+
+Изменить только frontend-поведение так,
+чтобы registration success flow продолжал работать
+без доступа к verification token.
+
+Пользователь должен после регистрации
+по-прежнему видеть текущий success UX
+и получать verification email.
+
+
+==================================================
+5. НЕ ЛОГИРОВАТЬ TOKEN
+==================================================
+
+Проверить текущий register flow.
+
+Raw verification token не должен выводиться:
+
+- console.log;
+- console.info;
+- console.error;
+- API response;
+- client bundle.
+
+Если есть server-side log самого token —
+удалить значение token из лога,
+не меняя остальную диагностическую информацию.
+
+
+==================================================
+6. ERROR FLOW НЕ МЕНЯТЬ
+==================================================
+
+Не менять существующие:
+
+400
+404
+409
+500
+502
+
+и другие error responses регистрации,
+кроме случаев, где они случайно содержат raw verification token.
+
+Не менять rollback.
+
+
+==================================================
+7. ПРОВЕРКИ
+==================================================
+
+Проверить:
+
+A. Обычная регистрация работает.
+
+B. Пользователь создаётся в auth_users.
+
+C. Ровно 3 auth_consents сохраняются как раньше.
+
+D. Raw verification token создаётся server-side.
+
+E. Hash token сохраняется в verification table как раньше.
+
+F. Verification email отправляется с рабочей ссылкой.
+
+G. Переход по verification URL подтверждает email как раньше.
+
+H. HTTP response POST /api/auth/register
+НЕ содержит raw verification token.
+
+I. Frontend registration success flow работает.
+
+J. Login после подтверждения работает.
+
+K. build / typecheck.
+
+Если repository tests есть — запустить.
+Если нет — не придумывать их.
+
+
+==================================================
+8. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть ТОЛЬКО:
+
+1. Где token создаётся.
+2. Где используется server-side.
+3. Как выглядел success response ДО.
+4. Как выглядит success response ПОСЛЕ.
+5. Использовал ли frontend verification_token.
+6. Какие файлы изменены.
+7. Результаты normal-flow.
+8. build/tests.
+
+Флаги:
+
+RAW_TOKEN_RETURNED_TO_CLIENT = YES/NO
+RAW_TOKEN_LOGGED = YES/NO
+
+TOKEN_GENERATION_CHANGED = YES/NO
+TOKEN_HASH_CHANGED = YES/NO
+TOKEN_TTL_CHANGED = YES/NO
+VERIFY_URL_CHANGED = YES/NO
+EMAIL_VERIFICATION_FLOW_CHANGED = YES/NO
+
+REGISTER_BUSINESS_LOGIC_CHANGED = YES/NO
+CONSENTS_CHANGED = YES/NO
+DATABASE_CHANGED = YES/NO
+PRISMA_CHANGED = YES/NO
+
+REGISTER_NORMAL_FLOW = PASS/FAIL
+EMAIL_VERIFICATION_FLOW = PASS/FAIL
+FRONTEND_REGISTRATION_FLOW = PASS/FAIL
+
+BUILD = PASS/FAIL
+REPOSITORY_TESTS = PASS/FAIL/NONE
+
+SAFE_TO_COMMIT = YES/NO
+
+SAFE_TO_COMMIT = YES разрешён только если:
+
+RAW_TOKEN_RETURNED_TO_CLIENT = NO
+RAW_TOKEN_LOGGED = NO
+
+TOKEN_GENERATION_CHANGED = NO
+TOKEN_HASH_CHANGED = NO
+TOKEN_TTL_CHANGED = NO
+VERIFY_URL_CHANGED = NO
+EMAIL_VERIFICATION_FLOW_CHANGED = NO
+
+REGISTER_BUSINESS_LOGIC_CHANGED = NO
+CONSENTS_CHANGED = NO
+DATABASE_CHANGED = NO
+PRISMA_CHANGED = NO
+
+REGISTER_NORMAL_FLOW = PASS
+EMAIL_VERIFICATION_FLOW = PASS
+FRONTEND_REGISTRATION_FLOW = PASS
+BUILD = PASS
+
+Если условие не выполнено:
+SAFE_TO_COMMIT = NO
+и указать только конкретную причину.
+
+НЕ проводить дополнительный аудит.
+НЕ предлагать другие улучшения.
+НЕ менять ничего за пределами этого задания.
+НЕ commit.
+НЕ push.
+НЕ deploy.

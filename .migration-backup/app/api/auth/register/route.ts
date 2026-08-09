@@ -284,10 +284,6 @@ export async function POST(req: Request) {
       project_id: project.id,
       status: user.status,
       email_verified: user.emailVerified,
-
-      // Временно оставляем для первичной проверки.
-      // После успешного теста регистрации удалим.
-      verification_token: rawToken,
     });
   } catch (error) {
     console.error("[REGISTER ERROR] exception caught", error);
