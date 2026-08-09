@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { prisma } from "../../../../lib/prisma";
+import {
+  limiter,
+  getClientIp,
+  normalizeEmail,
+  rateLimitResponse,
+  bodyTooLargeResponse,
+  BODY_LIMIT,
+} from "../../../../lib/rateLimiter";
 
 function signToken(payload: object) {
   // SECRET presence is validated before this function is called
@@ -17,6 +25,11 @@ function signToken(payload: object) {
 }
 
 export async function POST(req: Request) {
+  // ── 1. Body size guard (fast, before reading body) ─────────────────────────
+  const cl = req.headers.get("content-length");
+  if (cl !== null && Number(cl) > BODY_LIMIT) return bodyTooLargeResponse();
+
+  // ── 2. AUTH_SECRET guard ────────────────────────────────────────────────────
   if (!process.env.AUTH_SECRET) {
     console.error("[AUTH] AUTH_SECRET is missing");
     return NextResponse.json(
@@ -25,9 +38,35 @@ export async function POST(req: Request) {
     );
   }
 
-  try {
-    const { project_code, email, password } = await req.json();
+  // ── 3. IP rate limit — checked BEFORE body parse to avoid bcrypt under attack
+  const ip = getClientIp(req);
+  const ipResult = limiter.check(`login:ip:${ip}`, 5, 10 * 60 * 1000);
+  if (!ipResult.allowed) {
+    if (ipResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=login trigger=ip");
+    return rateLimitResponse(ipResult.retryAfterSeconds);
+  }
 
+  try {
+    // ── 4. Parse body (text → size check → JSON) ──────────────────────────────
+    const rawBody = await req.text();
+    if (rawBody.length > BODY_LIMIT) return bodyTooLargeResponse();
+
+    const { project_code, email, password } = JSON.parse(rawBody);
+
+    // ── 5. Email rate limit — AFTER parse, BEFORE bcrypt/DB ──────────────────
+    if (email && typeof email === "string") {
+      const emailResult = limiter.check(
+        `login:email:${normalizeEmail(email)}`,
+        5,
+        10 * 60 * 1000,
+      );
+      if (!emailResult.allowed) {
+        if (emailResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=login trigger=email");
+        return rateLimitResponse(emailResult.retryAfterSeconds);
+      }
+    }
+
+    // ── 6. Existing business logic (unchanged) ────────────────────────────────
     if (!project_code || !email || !password) {
       return NextResponse.json(
         { success: false, error: "project_code, email, password обязательны" },
@@ -62,7 +101,7 @@ export async function POST(req: Request) {
 
     if (!user.emailVerified || user.status !== "active") {
       return NextResponse.json(
-        { success: false, error: "Email не подтвержден" },
+        { success: false, error: "Email не подтверждён" },
         { status: 403 }
       );
     }

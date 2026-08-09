@@ -2,8 +2,28 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "../../../../lib/prisma";
 import { sendPasswordResetEmail } from "../../../../lib/unisender";
+import {
+  limiter,
+  getClientIp,
+  normalizeEmail,
+  rateLimitResponse,
+  bodyTooLargeResponse,
+  BODY_LIMIT,
+} from "../../../../lib/rateLimiter";
 
 export async function POST(req: Request) {
+  // ── 1. Body size guard ─────────────────────────────────────────────────────
+  const cl = req.headers.get("content-length");
+  if (cl !== null && Number(cl) > BODY_LIMIT) return bodyTooLargeResponse();
+
+  // ── 2. IP rate limit — BEFORE body parse ──────────────────────────────────
+  const ip = getClientIp(req);
+  const ipResult = limiter.check(`forgot:ip:${ip}`, 3, 60 * 60 * 1000);
+  if (!ipResult.allowed) {
+    if (ipResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=forgot-password trigger=ip");
+    return rateLimitResponse(ipResult.retryAfterSeconds);
+  }
+
   let stage = "parse_body";
 
   try {
@@ -29,7 +49,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const email = rawEmail.trim().toLowerCase();
+    const email = normalizeEmail(rawEmail);
+
+    // ── 3. Email rate limit — AFTER normalization, BEFORE user lookup/email ──
+    const emailResult = limiter.check(`forgot:email:${email}`, 2, 30 * 60 * 1000);
+    if (!emailResult.allowed) {
+      if (emailResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=forgot-password trigger=email");
+      return rateLimitResponse(emailResult.retryAfterSeconds);
+    }
 
     // Всегда возвращаем 200 — не раскрываем, существует пользователь или нет
     const genericOk = NextResponse.json({

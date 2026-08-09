@@ -3,8 +3,27 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { prisma } from "../../../../lib/prisma";
 import { sendVerificationEmail } from "../../../../lib/unisender";
+import {
+  limiter,
+  getClientIp,
+  rateLimitResponse,
+  bodyTooLargeResponse,
+  BODY_LIMIT,
+} from "../../../../lib/rateLimiter";
 
 export async function POST(req: Request) {
+  // ── 1. Body size guard ─────────────────────────────────────────────────────
+  const cl = req.headers.get("content-length");
+  if (cl !== null && Number(cl) > BODY_LIMIT) return bodyTooLargeResponse();
+
+  // ── 2. IP rate limit — BEFORE hashing/DB/email ────────────────────────────
+  const ip = getClientIp(req);
+  const ipResult = limiter.check(`register:ip:${ip}`, 3, 60 * 60 * 1000);
+  if (!ipResult.allowed) {
+    if (ipResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=register trigger=ip");
+    return rateLimitResponse(ipResult.retryAfterSeconds);
+  }
+
   console.info("[AUTH-REGISTER] BUILD_MARKER_AUTH_SERVICE_V3");
 
   try {
