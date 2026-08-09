@@ -1,8 +1,12 @@
 import jwt from "jsonwebtoken";
 
-const SECRET = process.env.AUTH_SECRET || "dev-secret";
+const SECRET = process.env.AUTH_SECRET;
 
 export function createAccessToken(payload: any) {
+  if (!SECRET) {
+    console.error("[AUTH] AUTH_SECRET is missing");
+    throw new Error("AUTH_SECRET_MISSING");
+  }
   return jwt.sign(
     payload,
     SECRET as any,
@@ -13,5 +17,9 @@ export function createAccessToken(payload: any) {
 }
 
 export function verifyAccessToken(token: string) {
+  if (!SECRET) {
+    console.error("[AUTH] AUTH_SECRET is missing");
+    throw new Error("AUTH_SECRET_MISSING");
+  }
   return jwt.verify(token, SECRET as any);
 }

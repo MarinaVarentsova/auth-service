@@ -40,7 +40,13 @@ export async function GET(req: Request) {
       }
     });
 
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message === "AUTH_SECRET_MISSING") {
+      return NextResponse.json(
+        { success: false, error: "Сервис временно недоступен. Мы уже работаем над исправлением." },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
       { success: false, error: "Invalid token" },
       { status: 401 }

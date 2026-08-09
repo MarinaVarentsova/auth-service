@@ -4,7 +4,8 @@ import crypto from "crypto";
 import { prisma } from "../../../../lib/prisma";
 
 function signToken(payload: object) {
-  const secret = process.env.AUTH_SECRET || "dev-secret";
+  // SECRET presence is validated before this function is called
+  const secret = process.env.AUTH_SECRET as string;
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = crypto
@@ -16,6 +17,14 @@ function signToken(payload: object) {
 }
 
 export async function POST(req: Request) {
+  if (!process.env.AUTH_SECRET) {
+    console.error("[AUTH] AUTH_SECRET is missing");
+    return NextResponse.json(
+      { success: false, error: "Сервис временно недоступен. Мы уже работаем над исправлением." },
+      { status: 503 }
+    );
+  }
+
   try {
     const { project_code, email, password } = await req.json();
 
