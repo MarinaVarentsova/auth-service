@@ -1,0 +1,141 @@
+НИЧЕГО НЕ МЕНЯТЬ.
+
+Перед commit нужно подтвердить, что rate-limit fix не изменил
+функционал регистрации и не создал обходов/побочных блокировок.
+
+Проверь ТОЛЬКО фактический текущий diff этих файлов:
+
+lib/rateLimiter.ts
+app/api/auth/login/route.ts
+app/api/auth/register/route.ts
+app/api/auth/forgot-password/route.ts
+
+1. REGISTER
+
+Покажи точный diff register/route.ts.
+
+Подтверди, что после прохождения:
+- body protection;
+- IP rate limit
+
+выполняется ТОЧНО прежняя бизнес-логика регистрации.
+
+Отдельно подтвердить, что НЕ изменены:
+
+- чтение project_code;
+- email;
+- password;
+- full_name;
+- phone;
+- consent_personal_data;
+- consent_platform_rules;
+- consent_marketing;
+- валидация двух обязательных согласий;
+- marketing=false;
+- password hashing;
+- prisma.$transaction;
+- создание auth_users;
+- createMany ровно 3 auth_consents;
+- document_type;
+- document_version;
+- accepted;
+- accepted_at;
+- verification token;
+- отправка verification email;
+- rollback/transaction behavior;
+- success response;
+- error responses существующей регистрации.
+
+Вернуть:
+
+REGISTER_BUSINESS_DIFF = NONE
+или показать конкретные изменения.
+
+2. BODY LIMIT
+
+Проверить НЕ только Content-Length.
+
+Для login, register и forgot-password ответить:
+
+может ли request body >64 KB пройти,
+если Content-Length отсутствует или подделан?
+
+Нужна фактическая проверка размера реально прочитанного body,
+а не только header.
+
+Пока НИЧЕГО не исправлять.
+
+Вернуть отдельно:
+
+LOGIN_BODY_LIMIT_BYPASSABLE = YES/NO
+REGISTER_BODY_LIMIT_BYPASSABLE = YES/NO
+FORGOT_BODY_LIMIT_BYPASSABLE = YES/NO
+
+и доказательство строками кода.
+
+3. LOGIN EMAIL LIMIT
+
+Показать точную последовательность:
+
+IP limiter
+→ parse
+→ email limiter
+→ поиск пользователя
+→ bcrypt.
+
+Ответить:
+
+email limiter увеличивает счётчик:
+A. на каждый login request
+или
+B. только на неуспешный login?
+
+Если A:
+подтвердить сценарий:
+
+посторонний человек делает 5 запросов с email жертвы
+→ настоящий владелец этого email получает 429 на следующие 10 минут
+
+EMAIL_TARGETED_LOCKOUT_POSSIBLE = YES/NO
+
+Ничего пока не менять.
+
+4. CLIENT IP
+
+Показать точную функцию определения IP.
+
+Ответить:
+
+- x-real-ip всегда ли выставляется Coolify в production;
+- доступен ли Auth container напрямую в обход reverse proxy;
+- может ли входящий клиент самостоятельно повлиять на x-real-ip;
+- может ли клиент подменить первый элемент x-forwarded-for fallback.
+
+Вернуть:
+
+X_REAL_IP_TRUSTED = YES/NO
+X_FORWARDED_FOR_FALLBACK_SPOOFABLE = YES/NO/NOT_PROVABLE_FROM_REPO
+
+Не менять Coolify или код.
+
+5. RATE LIMIT ПРИ УСПЕШНОМ REGISTER
+
+Ответить:
+успешная регистрация тоже расходует 1 из 3 IP attempts?
+
+Например:
+3 разных реальных пользователя за одним офисным NAT зарегистрировались,
+4-й в течение часа получит 429?
+
+REGISTER_SHARED_IP_EFFECT = описание фактического поведения.
+
+6. Запустить только существующие тесты.
+
+Никаких изменений.
+Никакого commit/push.
+
+В конце дать короткий verdict:
+
+SAFE_TO_COMMIT = YES/NO
+
+Если NO — перечислить только реальные блокирующие причины.
