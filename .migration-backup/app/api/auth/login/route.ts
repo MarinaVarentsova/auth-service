@@ -25,7 +25,7 @@ function signToken(payload: object) {
 }
 
 export async function POST(req: Request) {
-  // ── 1. Body size guard (fast, before reading body) ─────────────────────────
+  // ── 1. Body size guard (fast path — Content-Length header) ─────────────────
   const cl = req.headers.get("content-length");
   if (cl !== null && Number(cl) > BODY_LIMIT) return bodyTooLargeResponse();
 
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // ── 3. IP rate limit — checked BEFORE body parse to avoid bcrypt under attack
+  // ── 3. IP rate limit — checked BEFORE body parse ───────────────────────────
   const ip = getClientIp(req);
   const ipResult = limiter.check(`login:ip:${ip}`, 5, 10 * 60 * 1000);
   if (!ipResult.allowed) {
@@ -46,27 +46,47 @@ export async function POST(req: Request) {
     return rateLimitResponse(ipResult.retryAfterSeconds);
   }
 
+  // ── 4. Read and validate body (actual byte size, not just header) ──────────
+  let rawBody: string;
   try {
-    // ── 4. Parse body (text → size check → JSON) ──────────────────────────────
-    const rawBody = await req.text();
-    if (rawBody.length > BODY_LIMIT) return bodyTooLargeResponse();
+    rawBody = await req.text();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Ошибка чтения запроса." },
+      { status: 400 }
+    );
+  }
+  if (Buffer.byteLength(rawBody, "utf8") > BODY_LIMIT) return bodyTooLargeResponse();
 
-    const { project_code, email, password } = JSON.parse(rawBody);
+  let parsed: { project_code?: unknown; email?: unknown; password?: unknown };
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Некорректный формат запроса." },
+      { status: 400 }
+    );
+  }
 
-    // ── 5. Email rate limit — AFTER parse, BEFORE bcrypt/DB ──────────────────
-    if (email && typeof email === "string") {
-      const emailResult = limiter.check(
-        `login:email:${normalizeEmail(email)}`,
-        5,
-        10 * 60 * 1000,
-      );
-      if (!emailResult.allowed) {
-        if (emailResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=login trigger=email");
-        return rateLimitResponse(emailResult.retryAfterSeconds);
-      }
+  const { project_code, email, password } = parsed;
+
+  // ── 5. Failed-email gate — BEFORE bcrypt/DB ────────────────────────────────
+  // Counts only wrong-password attempts; successful login resets the counter.
+  // Protects against targeted password attacks on a known email without
+  // locking out legitimate users who mistype once.
+  const emailNorm = email && typeof email === "string" ? normalizeEmail(email) : null;
+  const emailKey = emailNorm ? `login:failed-email:${emailNorm}` : null;
+
+  if (emailKey) {
+    const emailGate = limiter.peekWithLog(emailKey, 10);
+    if (emailGate.blocked) {
+      if (emailGate.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=login trigger=failed-email");
+      return rateLimitResponse(emailGate.retryAfterSeconds);
     }
+  }
 
-    // ── 6. Existing business logic (unchanged) ────────────────────────────────
+  // ── 6. Business logic (unchanged) ─────────────────────────────────────────
+  try {
     if (!project_code || !email || !password) {
       return NextResponse.json(
         { success: false, error: "project_code, email, password обязательны" },
@@ -75,7 +95,7 @@ export async function POST(req: Request) {
     }
 
     const project = await prisma.project.findUnique({
-      where: { code: project_code }
+      where: { code: project_code as string }
     });
 
     if (!project || !project.isActive) {
@@ -88,11 +108,14 @@ export async function POST(req: Request) {
     const user = await prisma.user.findFirst({
       where: {
         projectId: project.id,
-        email,
+        email: email as string,
       }
     });
 
     if (!user) {
+      // User not found — same message as wrong password to avoid enumeration.
+      // Counted as a failed attempt: protects against probing known emails.
+      if (emailKey) limiter.increment(emailKey, 10 * 60 * 1000);
       return NextResponse.json(
         { success: false, error: "Неверный email или пароль" },
         { status: 401 }
@@ -100,20 +123,27 @@ export async function POST(req: Request) {
     }
 
     if (!user.emailVerified || user.status !== "active") {
+      // Legitimate user — account not yet verified. Not counted as a failed
+      // password attempt so the user is not locked out.
       return NextResponse.json(
         { success: false, error: "Email не подтверждён" },
         { status: 403 }
       );
     }
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
+    const ok = await bcrypt.compare(password as string, user.passwordHash);
 
     if (!ok) {
+      // Wrong password — increment failed-email counter.
+      if (emailKey) limiter.increment(emailKey, 10 * 60 * 1000);
       return NextResponse.json(
         { success: false, error: "Неверный email или пароль" },
         { status: 401 }
       );
     }
+
+    // ── Success: clear failed-email counter ───────────────────────────────────
+    if (emailKey) limiter.reset(emailKey);
 
     const accessToken = signToken({
       user_id: user.id,

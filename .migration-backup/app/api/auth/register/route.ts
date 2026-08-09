@@ -12,7 +12,7 @@ import {
 } from "../../../../lib/rateLimiter";
 
 export async function POST(req: Request) {
-  // ── 1. Body size guard ─────────────────────────────────────────────────────
+  // ── 1. Body size guard (fast path — Content-Length header) ─────────────────
   const cl = req.headers.get("content-length");
   if (cl !== null && Number(cl) > BODY_LIMIT) return bodyTooLargeResponse();
 
@@ -26,6 +26,37 @@ export async function POST(req: Request) {
 
   console.info("[AUTH-REGISTER] BUILD_MARKER_AUTH_SERVICE_V3");
 
+  // ── 3. Read and validate body (actual byte size, not just header) ──────────
+  let rawBody: string;
+  try {
+    rawBody = await req.text();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Ошибка чтения запроса." },
+      { status: 400 }
+    );
+  }
+  if (Buffer.byteLength(rawBody, "utf8") > BODY_LIMIT) return bodyTooLargeResponse();
+
+  let parsedBody: {
+    project_code?: unknown;
+    email?: unknown;
+    password?: unknown;
+    full_name?: unknown;
+    phone?: unknown;
+    consent_personal_data?: unknown;
+    consent_platform_rules?: unknown;
+    consent_marketing?: unknown;
+  };
+  try {
+    parsedBody = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Некорректный формат запроса." },
+      { status: 400 }
+    );
+  }
+
   try {
     const {
       project_code,
@@ -36,7 +67,7 @@ export async function POST(req: Request) {
       consent_personal_data,
       consent_platform_rules,
       consent_marketing,
-    } = await req.json();
+    } = parsedBody;
 
     console.info("[REGISTER PAYLOAD]", {
       project_code,
@@ -73,7 +104,7 @@ export async function POST(req: Request) {
 
     const project = await prisma.project.findUnique({
       where: {
-        code: project_code,
+        code: project_code as string,
       },
     });
 
@@ -90,7 +121,7 @@ export async function POST(req: Request) {
     const exists = await prisma.user.findFirst({
       where: {
         projectId: project.id,
-        email,
+        email: email as string,
       },
     });
 
@@ -105,7 +136,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password as string, 10);
 
     const rawToken = crypto.randomBytes(32).toString("hex");
 
@@ -122,9 +153,9 @@ export async function POST(req: Request) {
       const user = await tx.user.create({
         data: {
           projectId: project.id,
-          email,
-          phone: phone || null,
-          fullName: full_name,
+          email: email as string,
+          phone: (phone as string | undefined | null) || null,
+          fullName: full_name as string,
           passwordHash,
           status: "pending_email",
           emailVerified: false,
@@ -135,7 +166,7 @@ export async function POST(req: Request) {
         data: [
           {
             userId: user.id,
-            email,
+            email: email as string,
             documentType: "personal_data",
             documentVersion: "1.0",
             accepted: true,
@@ -143,7 +174,7 @@ export async function POST(req: Request) {
           },
           {
             userId: user.id,
-            email,
+            email: email as string,
             documentType: "platform_rules",
             documentVersion: "1.0",
             accepted: true,
@@ -151,7 +182,7 @@ export async function POST(req: Request) {
           },
           {
             userId: user.id,
-            email,
+            email: email as string,
             documentType: "marketing",
             documentVersion: "1.0",
             accepted: !!consent_marketing,
@@ -197,7 +228,7 @@ export async function POST(req: Request) {
 
     try {
       await sendVerificationEmail({
-        to: email,
+        to: email as string,
         verificationUrl,
       });
 

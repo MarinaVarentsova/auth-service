@@ -27,6 +27,7 @@ class BoundedRateLimiter {
 
   /**
    * Check and increment counter for a key.
+   * Every call counts (IP-style limits).
    * @returns allowed=true if request may proceed; firstBlock=true on the
    *          first blocked attempt (use for throttled logging).
    */
@@ -56,6 +57,55 @@ class BoundedRateLimiter {
     const firstBlock = !entry.logged;
     if (firstBlock) entry.logged = true;
     return { allowed: false, retryAfterSeconds, firstBlock };
+  }
+
+  /**
+   * Read-only gate check — does NOT increment the counter.
+   * Sets the logged flag on first block (throttled logging).
+   * Used for failed-attempt limits where counting happens separately.
+   */
+  peekWithLog(
+    key: string,
+    limit: number,
+  ): { blocked: boolean; retryAfterSeconds: number; firstBlock: boolean } {
+    const now = Date.now();
+    const entry = this.store.get(key);
+
+    if (!entry || now >= entry.resetAt) {
+      return { blocked: false, retryAfterSeconds: 0, firstBlock: false };
+    }
+    if (entry.count < limit) {
+      return { blocked: false, retryAfterSeconds: 0, firstBlock: false };
+    }
+
+    const retryAfterSeconds = Math.ceil((entry.resetAt - now) / 1000);
+    const firstBlock = !entry.logged;
+    if (firstBlock) entry.logged = true;
+    return { blocked: true, retryAfterSeconds, firstBlock };
+  }
+
+  /**
+   * Increment a counter without making an allow/deny decision.
+   * Creates a new window if none exists or the previous one expired.
+   * Used for failed-attempt counting after the outcome is known.
+   */
+  increment(key: string, windowMs: number): void {
+    const now = Date.now();
+    const entry = this.store.get(key);
+    if (!entry || now >= entry.resetAt) {
+      this.ensureCap(now);
+      this.store.set(key, { count: 1, resetAt: now + windowMs, logged: false });
+    } else {
+      entry.count++;
+    }
+  }
+
+  /**
+   * Delete a counter entirely.
+   * Used on successful login to clear the failed-attempt counter for that email.
+   */
+  reset(key: string): void {
+    this.store.delete(key);
   }
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
@@ -99,17 +149,28 @@ export const limiter = new BoundedRateLimiter();
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Extract the real client IP.
- * Priority: x-real-ip (set by Coolify/nginx as $remote_addr, not spoofable
- * by the client) → first value of x-forwarded-for → "unknown".
+ * Extract the real client IP for a single trusted reverse-proxy hop
+ * (Coolify/Traefik).
+ *
+ * How X-Forwarded-For works with one trusted proxy:
+ *   Client sends request with optional X-Forwarded-For: <anything>
+ *   Traefik APPENDS the real client IP it sees:
+ *     X-Forwarded-For: <client-controlled-values>, <real-client-ip>
+ *
+ * The LAST element is added by the trusted proxy and cannot be spoofed
+ * by the client — even if the client sends "X-Forwarded-For: fake-ip",
+ * Traefik appends the real IP, making the header "fake-ip, real-ip".
+ * We take the last element, ignoring all client-controlled prefixes.
+ *
+ * Falls back to "unknown" if the header is absent (e.g. direct connection
+ * or proxy misconfiguration).
  */
 export function getClientIp(req: Request): string {
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) return realIp.trim();
-
   const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-
+  if (forwarded) {
+    const parts = forwarded.split(",");
+    return parts[parts.length - 1].trim();
+  }
   return "unknown";
 }
 

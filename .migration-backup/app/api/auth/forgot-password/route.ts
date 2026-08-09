@@ -12,7 +12,7 @@ import {
 } from "../../../../lib/rateLimiter";
 
 export async function POST(req: Request) {
-  // ── 1. Body size guard ─────────────────────────────────────────────────────
+  // ── 1. Body size guard (fast path — Content-Length header) ─────────────────
   const cl = req.headers.get("content-length");
   if (cl !== null && Number(cl) > BODY_LIMIT) return bodyTooLargeResponse();
 
@@ -24,10 +24,31 @@ export async function POST(req: Request) {
     return rateLimitResponse(ipResult.retryAfterSeconds);
   }
 
+  // ── 3. Read and validate body (actual byte size, not just header) ──────────
+  let rawBody: string;
+  try {
+    rawBody = await req.text();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Ошибка чтения запроса." },
+      { status: 400 }
+    );
+  }
+  if (Buffer.byteLength(rawBody, "utf8") > BODY_LIMIT) return bodyTooLargeResponse();
+
+  let body: { project_code?: unknown; email?: unknown };
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Некорректный формат запроса." },
+      { status: 400 }
+    );
+  }
+
   let stage = "parse_body";
 
   try {
-    const body = await req.json();
     const { project_code, email: rawEmail } = body;
 
     if (!project_code || !rawEmail) {
@@ -39,7 +60,7 @@ export async function POST(req: Request) {
 
     stage = "find_project";
     const project = await prisma.project.findUnique({
-      where: { code: project_code },
+      where: { code: project_code as string },
     });
 
     if (!project || !project.isActive) {
@@ -49,9 +70,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const email = normalizeEmail(rawEmail);
+    const email = normalizeEmail(rawEmail as string);
 
-    // ── 3. Email rate limit — AFTER normalization, BEFORE user lookup/email ──
+    // ── 4. Email rate limit — AFTER normalization, BEFORE user lookup/email ──
     const emailResult = limiter.check(`forgot:email:${email}`, 2, 30 * 60 * 1000);
     if (!emailResult.allowed) {
       if (emailResult.firstBlock) console.info("[AUTH_RATE_LIMIT] endpoint=forgot-password trigger=email");

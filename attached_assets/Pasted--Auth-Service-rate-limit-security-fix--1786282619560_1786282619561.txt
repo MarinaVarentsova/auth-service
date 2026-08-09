@@ -1,0 +1,417 @@
+Работаем ТОЛЬКО в Auth Service.
+
+Это ФИНАЛЬНАЯ доработка текущего rate-limit security fix.
+
+Никаких дополнительных аудитов.
+Никаких предложений "можно ещё улучшить".
+Исправить перечисленное ниже, проверить результат и остановиться.
+
+НЕ менять:
+- бизнес-логику регистрации;
+- auth_consents;
+- обязательность согласий;
+- marketing consent;
+- Prisma;
+- БД;
+- JWT;
+- AUTH_SECRET;
+- verification;
+- reset-password;
+- refresh;
+- logout;
+- /me;
+- email templates;
+- успешные API responses;
+- Coolify;
+- ENV.
+
+НЕ делать commit/push/deploy.
+
+
+==================================================
+1. BODY LIMIT — ДОВЕСТИ ДО КОНЦА
+==================================================
+
+Для:
+
+POST /api/auth/login
+POST /api/auth/register
+POST /api/auth/forgot-password
+
+максимальный ФАКТИЧЕСКИЙ размер request body = 64 KB.
+
+Content-Length оставить только как быстрый первый guard.
+
+Обязательно:
+
+- прочитать raw body;
+- проверить реальный UTF-8 byte size через
+  Buffer.byteLength(rawBody, "utf8");
+- если >64 KB → сразу HTTP 413;
+- только после проверки выполнять JSON.parse(rawBody).
+
+Нельзя полагаться только на Content-Length.
+Нельзя использовать req.json() до фактической проверки размера.
+
+Ответ 413:
+
+{
+  "success": false,
+  "error": "Размер запроса превышает допустимый."
+}
+
+Malformed JSON должен давать корректный клиентский 400,
+а не 500.
+
+
+==================================================
+2. LOGIN IP LIMIT
+==================================================
+
+Оставить:
+
+5 запросов / 10 минут / client IP.
+
+Проверять максимально рано до:
+- DB;
+- bcrypt;
+- JWT.
+
+При превышении:
+
+HTTP 429
+
+{
+  "success": false,
+  "error": "Мы заботимся о безопасности пользователей, поэтому подключения временно ограничены. Попробуйте снова через X минут.",
+  "retry_after_seconds": N
+}
+
+Header:
+
+Retry-After: N
+
+
+==================================================
+3. LOGIN EMAIL PROTECTION
+==================================================
+
+Текущую реализацию,
+где 5 ЛЮБЫХ запросов на email блокируют владельца,
+НЕ оставлять.
+
+Использовать:
+
+10 НЕУСПЕШНЫХ login attempts
+/ 10 минут
+/ normalized email.
+
+Email:
+
+trim().toLowerCase()
+
+Успешный login:
+- НЕ считается неуспешной попыткой;
+- сбрасывает failed-attempt counter этого email.
+
+Неуспешная авторизация:
+- увеличивает failed-attempt counter.
+
+При достижении лимита:
+→ HTTP 429 с тем же пользовательским security message.
+
+Не менять существующий обычный ответ
+при неправильном логине/пароле.
+
+Не раскрывать существование email.
+
+
+==================================================
+4. REGISTER LIMIT
+==================================================
+
+Оставить:
+
+3 запроса / 60 минут / IP.
+
+Это сознательно строгий лимит.
+
+При блокировке запрос НЕ должен доходить до:
+- bcrypt;
+- PostgreSQL;
+- user.create;
+- auth_consents;
+- verification token;
+- UniSender.
+
+ВАЖНО:
+
+после прохождения защитных проверок
+ВСЯ существующая бизнес-логика register
+должна выполняться без изменений.
+
+В частности НЕ менять:
+
+project_code
+email
+password
+full_name
+phone
+consent_personal_data
+consent_platform_rules
+consent_marketing
+
+валидацию обязательных согласий
+marketing=false
+bcrypt
+prisma.$transaction
+tx.user.create
+tx.consent.createMany — ровно 3 строки
+document_type
+document_version
+accepted
+accepted_at
+verification token
+verification email
+rollback
+success response.
+
+
+==================================================
+5. FORGOT PASSWORD
+==================================================
+
+Оставить:
+
+3 запроса / 60 минут / IP
+
+и
+
+2 запроса / 30 минут / normalized email.
+
+При блокировке:
+- не создавать reset token;
+- не обращаться лишний раз к БД;
+- не отправлять UniSender email.
+
+Существующую бизнес-логику forgot-password не менять.
+
+
+==================================================
+6. CLIENT IP
+==================================================
+
+Auth находится за одним reverse-proxy hop Coolify/Traefik.
+
+Не использовать доверчивую схему:
+
+x-real-ip
+→ первый X-Forwarded-For
+
+если эти значения могут быть подделаны клиентом.
+
+Реализовать определение IP для одного trusted proxy hop так,
+чтобы простая отправка клиентом:
+
+X-Forwarded-For: fake-ip
+
+не позволяла менять rate-limit key.
+
+Для X-Forwarded-For использовать адрес,
+добавленный ближайшим доверенным reverse proxy,
+а не первый пользовательский адрес цепочки.
+
+Не менять Coolify config.
+
+Не добавлять внешний сервис.
+
+
+==================================================
+7. RATE LIMITER MEMORY
+==================================================
+
+Сохранить текущую защиту:
+
+- in-memory;
+- TTL;
+- cleanup;
+- hard cap = 10 000 keys;
+- удаление expired;
+- oldest eviction при cap;
+- timer.unref().
+
+Не использовать PostgreSQL.
+Не использовать Redis.
+Не создавать таблицы.
+
+
+==================================================
+8. LOGS
+==================================================
+
+Сохранить bounded logging.
+
+Не писать лог на каждый заблокированный запрос.
+
+Не логировать:
+- email;
+- IP;
+- password;
+- token;
+- AUTH_SECRET;
+- request body.
+
+Атака не должна заполнить диск логами.
+
+
+==================================================
+9. ПОЛЬЗОВАТЕЛЬСКОЕ СООБЩЕНИЕ
+==================================================
+
+Для 429 использовать:
+
+"Мы заботимся о безопасности пользователей, поэтому подключения временно ограничены. Попробуйте снова через X минут."
+
+X = фактическое оставшееся время.
+
+Корректное склонение:
+
+1 минуту
+2 минуты
+3 минуты
+4 минуты
+5 минут
+11 минут
+21 минуту
+22 минуты
+25 минут
+
+Минимум:
+1 минута.
+
+API дополнительно возвращает:
+
+retry_after_seconds
+
+и header:
+
+Retry-After.
+
+
+==================================================
+10. ПРОВЕРКА
+==================================================
+
+После реализации выполнить ОДИН финальный набор проверок.
+
+Проверить:
+
+LOGIN
+- обычный login работает;
+- правильный пароль работает;
+- неправильный пароль работает как раньше;
+- IP limiter работает;
+- failed-email limiter работает;
+- успешный login сбрасывает failed-email counter;
+- body >64 KB → 413.
+
+REGISTER
+- обычная регистрация работает;
+- обязательные consent работают;
+- marketing=false работает;
+- создаётся user;
+- создаются ровно 3 auth_consents;
+- verification flow работает;
+- body >64 KB → 413;
+- 4-й запрос/IP → 429.
+
+FORGOT PASSWORD
+- обычный flow работает;
+- IP limiter работает;
+- email limiter работает;
+- body >64 KB → 413.
+
+BODY BYPASS
+Проверить >64 KB:
+- без Content-Length;
+- с Content-Length меньше фактического body.
+
+Оба сценария должны → 413.
+
+MEMORY
+- hard cap остаётся 10 000;
+- cleanup работает.
+
+BUILD
+- npm run build;
+- typecheck, если предусмотрен проектом.
+
+Если постоянных repository tests нет,
+НЕ писать "tests passed".
+
+Разделить:
+
+REPOSITORY_TESTS = NONE
+
+и
+
+AD_HOC_SECURITY_CHECKS = PASS/FAIL
+
+
+==================================================
+11. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть ТОЛЬКО:
+
+1. Изменённые файлы.
+
+2. Итоговые лимиты:
+login IP
+login failed-email
+register IP
+forgot IP
+forgot email
+body size
+memory cap.
+
+3. Результат проверок.
+
+4. Подтверждение регистрации:
+
+REGISTER_BUSINESS_LOGIC_UNCHANGED = YES/NO
+CONSENTS_UNCHANGED = YES/NO
+
+5. Флаги:
+
+LOGIN_NORMAL_FLOW = PASS/FAIL
+REGISTER_NORMAL_FLOW = PASS/FAIL
+FORGOT_NORMAL_FLOW = PASS/FAIL
+
+BODY_LIMIT_BYPASSABLE = YES/NO
+IP_HEADER_SIMPLE_SPOOF_BYPASS = YES/NO
+SUCCESSFUL_LOGIN_COUNTS_AS_FAILED = YES/NO
+
+DATABASE_CHANGED = YES/NO
+PRISMA_CHANGED = YES/NO
+JWT_CHANGED = YES/NO
+EMAIL_LOGIC_CHANGED = YES/NO
+
+MEMORY_BOUNDED = YES/NO
+LOGS_BOUNDED = YES/NO
+
+BUILD = PASS/FAIL
+REPOSITORY_TESTS = PASS/FAIL/NONE
+AD_HOC_SECURITY_CHECKS = PASS/FAIL
+
+SAFE_TO_COMMIT = YES/NO
+
+Если SAFE_TO_COMMIT = NO:
+указать конкретную причину.
+
+НЕ предлагать дополнительные улучшения.
+НЕ проводить следующий аудит.
+НЕ менять ничего за пределами этого задания.
+НЕ commit.
+НЕ push.
+НЕ deploy.
