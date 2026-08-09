@@ -1,0 +1,221 @@
+Работаем ТОЛЬКО в текущем проекте Auth Service.
+
+ЗАДАЧА:
+очистить текущую tracked-версию GitHub-репозитория от старых неиспользуемых артефактов, персональных данных и инфраструктурных хвостов.
+
+ВАЖНО:
+- НЕ менять production runtime;
+- НЕ менять business logic регистрации/авторизации;
+- НЕ менять login/register/logout/me/verify/reset;
+- НЕ менять JWT;
+- НЕ менять Prisma/БД;
+- НЕ менять ENV;
+- НЕ устанавливать пакеты;
+- НЕ делать push;
+- НЕ переписывать git-history.
+
+Сначала анализ → затем удаление ТОЛЬКО однозначно неиспользуемых tracked-файлов.
+
+==================================================
+1. ПЕРСОНАЛЬНЫЕ ДАННЫЕ В GIT
+==================================================
+
+Проверить ВСЕ tracked-файлы текущего репозитория на:
+
+- реальные ФИО;
+- реальные email;
+- телефоны;
+- адреса;
+- данные пользователей;
+- production logs;
+- database dumps;
+- CSV/XLSX/JSON/TXT с реальными пользователями;
+- скриншоты/вложения с ПД.
+
+Отличать реальные ПД от очевидных test fixtures.
+
+Если найден файл с реальными ПД:
+перед удалением подтвердить:
+
+RUNTIME_REFERENCE_COUNT = 0
+BUILD_REFERENCE_COUNT = 0
+TEST_REFERENCE_COUNT = 0
+DEPLOY_REFERENCE_COUNT = 0
+
+Только после этого удалить файл из текущей tracked-версии.
+
+==================================================
+2. СТАРЫЙ OPENAI
+==================================================
+
+OPENAI_API_KEY из production ENV уже удалён вручную.
+В рабочем Auth Service OpenAI использоваться не должен.
+
+Проверить tracked-файлы на:
+
+OPENAI_API_KEY
+api.openai.com
+openai.com
+OpenAI SDK
+new OpenAI
+openai package
+gpt-*
+старые OpenAI инструкции/debug snippets/Pasted-файлы.
+
+Каждое совпадение классифицировать:
+
+LIVE_RUNTIME
+CURRENT_DOCUMENTATION
+OLD_UNUSED_ARTIFACT
+COMMENT
+TEST_FIXTURE
+
+Удалять ТОЛЬКО OLD_UNUSED_ARTIFACT.
+
+Если LIVE_RUNTIME обнаружен — НЕ менять код, а остановиться и показать точное место.
+
+==================================================
+3. СТАРЫЙ SUPABASE
+==================================================
+
+Проверить:
+
+supabase
+SUPABASE_URL
+SUPABASE_KEY
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+supabase.storage
+старые Supabase SQL/CSV/TXT/MD exports/snippets.
+
+Удалять только старые неиспользуемые assets.
+
+НЕ удалять безопасную SQL-схему, если она реально нужна миграциям/документации.
+
+==================================================
+4. СТАРЫЙ VERCEL
+==================================================
+
+Проверить:
+
+vercel
+vercel.json
+VERCEL_*
+@vercel/*
+старые Vercel deploy/serverless файлы
+старые инструкции.
+
+Для каждого определить:
+используется ли текущим deployment.
+
+Если Coolify/Nixpacks не использует файл и он относится к старому deployment — удалить.
+
+НЕ менять текущую конфигурацию Coolify.
+
+==================================================
+5. СЕКРЕТЫ
+==================================================
+
+Проверить tracked-файлы на:
+
+.env
+DATABASE_URL
+AUTH_SECRET
+SESSION_SECRET
+UNISENDER_API_KEY
+OPENAI_API_KEY
+API tokens
+GitHub PAT
+passwords
+private keys.
+
+ЗНАЧЕНИЯ НЕ ПОКАЗЫВАТЬ.
+
+Формат:
+тип → файл → masked → tracked/untracked → риск.
+
+Если найден реальный секрет:
+НЕ ротировать его автоматически.
+Только показать.
+
+==================================================
+6. СТАРЫЕ АРТЕФАКТЫ
+==================================================
+
+Проверить особенно:
+
+attached_assets/
+.migration-backup/
+backup/
+backups/
+tmp/
+old/
+archive/
+*.bak
+*.old
+Pasted-*.txt
+debug-файлы
+старые screenshots/exports.
+
+ВАЖНО:
+.migration-backup НЕ удалять только по названию.
+
+Сначала проверить, используется ли эта директория текущим Coolify deployment.
+
+По последнему production deploy Coolify запускал build из `.migration-backup`,
+поэтому любые файлы внутри неё считать потенциально LIVE до доказательства обратного.
+
+==================================================
+7. ПОСЛЕ УДАЛЕНИЯ
+==================================================
+
+Запустить:
+
+npm run build
+typecheck / tsc, если есть
+существующие tests
+
+Затем:
+
+git status
+git diff --stat
+
+НЕ commit.
+НЕ push.
+
+==================================================
+ОТЧЁТ
+==================================================
+
+Вернуть таблицу:
+
+Файл
+| что найдено
+| классификация
+| runtime references
+| build references
+| deploy references
+| удалён YES/NO
+| почему
+
+И итог:
+
+PERSONAL_DATA_IN_TRACKED_FILES = YES/NO
+REAL_SECRETS_IN_TRACKED_FILES = YES/NO
+OPENAI_RUNTIME = YES/NO
+SUPABASE_RUNTIME = YES/NO
+VERCEL_RUNTIME = YES/NO
+OLD_UNUSED_FILES_REMOVED = число
+PRODUCTION_LOGIC_CHANGED = YES/NO
+BUILD = PASS/FAIL
+TESTS = PASS/FAIL
+
+Отдельно перечислить ВСЕ оставшиеся совпадения:
+OpenAI
+Supabase
+Vercel
+
+и объяснить, почему каждое оставлено.
+
+Никаких других изменений.
+Никакого commit/push.
