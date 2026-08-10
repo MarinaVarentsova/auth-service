@@ -123,11 +123,14 @@ export async function POST(req: Request) {
     }
 
     if (!user.emailVerified || user.status !== "active") {
-      // Legitimate user — account not yet verified. Not counted as a failed
-      // password attempt so the user is not locked out.
+      // User exists but account is not verified / not active.
+      // Returning the same 401 as "wrong password" to prevent enumeration:
+      // an attacker cannot distinguish "email does not exist" from
+      // "email exists but account is not ready".
+      // Not incremented to failed-email counter — not a password attack.
       return NextResponse.json(
-        { success: false, error: "Email не подтверждён" },
-        { status: 403 }
+        { success: false, error: "Неверный email или пароль" },
+        { status: 401 }
       );
     }
 
