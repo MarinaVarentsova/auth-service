@@ -1,0 +1,231 @@
+Работаем ТОЛЬКО в artifacts/api-server.
+
+Исправляем ОДНУ security-проблему:
+
+в production отсутствует явный безопасный набор HTTP security headers.
+
+Нужно добавить минимальный security baseline
+для api-server,
+НЕ меняя его API-логику.
+
+НЕ проводить общий аудит.
+НЕ менять:
+- Палату;
+- Auth Service;
+- AI Gateway;
+- БД;
+- Prisma;
+- CORS;
+- notify business logic;
+- UniSender;
+- ENV;
+- Docker/Coolify.
+
+НЕ делать commit/push/deploy.
+
+
+==================================================
+1. ПРОВЕРИТЬ ТЕКУЩИЕ HEADERS
+==================================================
+
+Проверить:
+
+artifacts/api-server/src/app.ts
+
+и связанные middleware.
+
+Найти:
+
+helmet
+Content-Security-Policy
+X-Content-Type-Options
+X-Frame-Options
+Referrer-Policy
+Permissions-Policy
+Strict-Transport-Security
+Cross-Origin-*
+X-Powered-By
+
+Если часть уже есть — не дублировать.
+
+
+==================================================
+2. ДОБАВИТЬ SAFE BASELINE
+==================================================
+
+Для production добавить:
+
+X-Content-Type-Options: nosniff
+
+X-Frame-Options: DENY
+
+Referrer-Policy:
+strict-origin-when-cross-origin
+
+Permissions-Policy:
+camera=(), microphone=(), geolocation=()
+
+Cross-Origin-Opener-Policy:
+same-origin
+
+Cross-Origin-Resource-Policy:
+same-origin
+ТОЛЬКО если это не ломает существующие API responses.
+
+
+==================================================
+3. X-POWERED-BY
+==================================================
+
+Отключить:
+
+X-Powered-By
+
+После изменения:
+
+X_POWERED_BY_EXPOSED = NO
+
+
+==================================================
+4. CSP
+==================================================
+
+api-server — API backend.
+
+Не добавлять сложный CSP,
+если он не нужен JSON API.
+
+Если Helmet используется,
+CSP можно отключить,
+если он не даёт реальной пользы для этого backend.
+
+CSP_ENABLED = YES/NO
+
+
+==================================================
+5. HSTS
+==================================================
+
+Если api-server реально доступен только через HTTPS reverse proxy,
+можно включить HSTS.
+
+Но:
+
+- без preload;
+- без includeSubDomains без необходимости.
+
+Если не уверен —
+не включать.
+
+HSTS_ENABLED = YES/NO
+
+
+==================================================
+6. CORS НЕ МЕНЯТЬ
+==================================================
+
+Текущий CORS уже исправлен ранее:
+
+production:
+https://platformaekspertov.ru
+
+dev:
+localhost/127.0.0.1 только вне production
+
+Старый sslip.io удалён.
+
+ЭТУ ЛОГИКУ НЕ ТРОГАТЬ.
+
+
+==================================================
+7. НЕ ЛОМАТЬ API
+==================================================
+
+После изменений должны работать:
+
+- /api/notify;
+- existing API endpoints;
+- Authorization;
+- OPTIONS/preflight;
+- CORS;
+- server-to-server calls.
+
+Не менять:
+status codes,
+JSON responses,
+payloads.
+
+
+==================================================
+8. ПРОВЕРКИ
+==================================================
+
+Проверить:
+
+A. JSON API → работает.
+B. CORS production origin → работает.
+C. evil origin → не разрешён.
+D. OPTIONS → работает.
+E. Authorization → работает.
+F. notify internal guard → работает.
+G. TSC/build.
+H. существующие tests.
+
+
+==================================================
+9. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть только:
+
+HEADERS_BEFORE =
+HEADERS_AFTER =
+
+SECURITY_HEADERS_ACTIVE = YES/NO
+X_CONTENT_TYPE_OPTIONS = PASS/FAIL
+FRAME_PROTECTION = PASS/FAIL
+REFERRER_POLICY = PASS/FAIL
+PERMISSIONS_POLICY = PASS/FAIL
+X_POWERED_BY_EXPOSED = YES/NO
+
+CSP_ENABLED = YES/NO
+HSTS_ENABLED = YES/NO
+
+CORS_CHANGED = YES/NO
+NOTIFY_CHANGED = YES/NO
+API_BUSINESS_LOGIC_CHANGED = YES/NO
+DATABASE_CHANGED = YES/NO
+
+API_NORMAL_FLOW = PASS/FAIL
+CORS_NORMAL_FLOW = PASS/FAIL
+NOTIFY_NORMAL_FLOW = PASS/FAIL
+BUILD = PASS/FAIL
+REPOSITORY_TESTS = PASS/FAIL/NONE
+
+SAFE_TO_COMMIT = YES/NO
+
+SAFE_TO_COMMIT = YES только если:
+
+SECURITY_HEADERS_ACTIVE = YES
+X_CONTENT_TYPE_OPTIONS = PASS
+FRAME_PROTECTION = PASS
+REFERRER_POLICY = PASS
+PERMISSIONS_POLICY = PASS
+X_POWERED_BY_EXPOSED = NO
+
+CORS_CHANGED = NO
+NOTIFY_CHANGED = NO
+API_BUSINESS_LOGIC_CHANGED = NO
+DATABASE_CHANGED = NO
+
+API_NORMAL_FLOW = PASS
+CORS_NORMAL_FLOW = PASS
+NOTIFY_NORMAL_FLOW = PASS
+BUILD = PASS
+
+Не проводить дополнительный аудит.
+Не предлагать новые улучшения.
+Не менять ничего сверх задачи.
+Не commit.
+Не push.
+Не deploy.
