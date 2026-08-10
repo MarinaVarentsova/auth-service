@@ -1,0 +1,349 @@
+Работаем ТОЛЬКО в Auth Service.
+
+Исправляем ОДНУ проблему:
+
+logout / refresh сейчас фактически являются заглушками,
+при этом полноценная server-side refresh-session архитектура
+в проекте не используется.
+
+Нужно ОЧЕНЬ АККУРАТНО привести logout/refresh
+к честному безопасному поведению
+БЕЗ внедрения новой системы сессий,
+БЕЗ новых таблиц и БЕЗ изменения текущего login/JWT flow.
+
+ВАЖНО:
+
+НЕ проводить общий аудит.
+НЕ внедрять полноценные refresh tokens.
+НЕ создавать таблицы sessions/refresh_tokens.
+НЕ менять Prisma.
+НЕ менять БД.
+НЕ менять access token format.
+НЕ менять access token TTL.
+НЕ менять AUTH_SECRET.
+НЕ менять login.
+НЕ менять /me.
+НЕ менять register.
+НЕ менять verify.
+НЕ менять reset-password.
+НЕ менять rate limiting.
+НЕ менять frontend UI.
+НЕ менять другие security-проблемы.
+
+НЕ делать commit.
+НЕ делать push.
+НЕ делать deploy.
+
+
+==================================================
+1. СНАЧАЛА ОПРЕДЕЛИТЬ ФАКТИЧЕСКОЕ СОСТОЯНИЕ
+==================================================
+
+Найти существующие endpoints:
+
+POST /api/auth/logout
+POST /api/auth/refresh
+
+и все frontend call sites.
+
+Определить:
+
+- что logout делает сейчас;
+- что refresh делает сейчас;
+- существует ли реально refresh token;
+- хранится ли refresh token где-либо;
+- передаёт ли frontend refresh token;
+- использует ли приложение refresh endpoint вообще.
+
+После этого сразу выполнить минимальное исправление.
+
+
+==================================================
+2. НЕ ВНЕДРЯТЬ НОВУЮ REFRESH-АРХИТЕКТУРУ
+==================================================
+
+Если фактически refresh token в системе НЕ существует:
+
+НЕ создавать его.
+
+НЕ добавлять:
+- refresh token generation;
+- refresh token DB storage;
+- cookies;
+- session table;
+- rotation;
+- revocation list;
+- Redis.
+
+Вместо этого убрать ложное ощущение,
+что refresh механизм работает.
+
+
+==================================================
+3. /refresh — FAIL CLOSED
+==================================================
+
+Если текущий /refresh является заглушкой
+или не имеет реального refresh token:
+
+он НЕ должен выдавать новый access token
+и НЕ должен делать вид, что refresh поддерживается.
+
+Вернуть контролируемый ответ:
+
+HTTP 401
+
+{
+  "success": false,
+  "error": "Сессия истекла. Пожалуйста, войдите снова."
+}
+
+Не раскрывать технические детали.
+
+Не менять access token.
+
+
+==================================================
+4. /logout
+==================================================
+
+Если server-side session storage сейчас отсутствует:
+
+не создавать новую инфраструктуру только ради logout.
+
+Logout должен:
+
+- корректно завершать текущий client session flow;
+- не выдавать новый token;
+- не обновлять access token;
+- не создавать refresh token;
+- возвращать безопасный success response.
+
+Например:
+
+HTTP 200
+
+{
+  "success": true
+}
+
+Frontend после logout должен удалить текущий access token
+из своего существующего storage.
+
+Не менять UI.
+
+
+==================================================
+5. FRONTEND
+==================================================
+
+Проверить текущий logout flow.
+
+После успешного logout:
+
+- access token удалён;
+- user state очищен;
+- пользователь возвращается в существующий login flow;
+- защищённые страницы больше не доступны через frontend state.
+
+Если frontend сейчас вызывает /refresh автоматически:
+
+убрать зависимость от fake refresh endpoint.
+
+При 401 от защищённого API:
+использовать существующий logout/login flow,
+а не пытаться бесконечно refresh-ить сессию.
+
+НЕ менять внешний UX.
+
+
+==================================================
+6. ACCESS TOKEN TTL
+==================================================
+
+Проверить текущий фактический access token TTL.
+
+НЕ менять его.
+
+В отчёте указать точное текущее значение.
+
+После logout старый access token,
+если он был скопирован отдельно,
+может технически жить только до окончания своего текущего TTL.
+
+Это принимается как текущая архитектурная модель.
+
+Не создавать blacklist access tokens.
+
+
+==================================================
+7. НЕ СОЗДАВАТЬ ЛОЖНУЮ SERVER-SIDE INVALIDATION
+==================================================
+
+Не утверждать,
+что access token мгновенно инвалидируется server-side,
+если blacklist/session store отсутствуют.
+
+Нужно честно сохранить модель:
+
+logout
+→ client token удалён
+
+access token
+→ сам истекает по TTL
+
+refresh
+→ новый token не выдаётся.
+
+
+==================================================
+8. ОШИБКИ
+==================================================
+
+Refresh без реального refresh-механизма:
+
+401
+
+{
+  "success": false,
+  "error": "Сессия истекла. Пожалуйста, войдите снова."
+}
+
+Logout:
+
+200
+
+{
+  "success": true
+}
+
+Не возвращать:
+- stack trace;
+- JWT details;
+- AUTH_SECRET;
+- token contents.
+
+
+==================================================
+9. ПРОВЕРКИ
+==================================================
+
+Проверить:
+
+A.
+валидный login
+→ работает как раньше.
+
+B.
+access token
+→ работает в /me до TTL.
+
+C.
+logout
+→ success.
+
+D.
+frontend после logout
+→ access token удалён.
+
+E.
+после logout frontend не считает пользователя авторизованным.
+
+F.
+/refresh
+→ НЕ выдаёт access token.
+
+G.
+/refresh
+→ возвращает 401 с понятным сообщением.
+
+H.
+никакие новые refresh/session записи в БД не создаются.
+
+I.
+JWT format не изменён.
+
+J.
+JWT TTL не изменён.
+
+K.
+login normal flow не изменён.
+
+L.
+build/typecheck.
+
+Если repository tests есть — запустить.
+Если нет — NONE.
+
+
+==================================================
+10. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть ТОЛЬКО:
+
+1. Что logout делал ДО.
+2. Что refresh делал ДО.
+3. Что logout делает ПОСЛЕ.
+4. Что refresh делает ПОСЛЕ.
+5. Использовался ли refresh frontend-ом.
+6. Точный текущий access token TTL.
+7. Какие файлы изменены.
+8. Результаты normal-flow.
+9. build/tests.
+
+Флаги:
+
+REAL_REFRESH_TOKEN_EXISTS = YES/NO
+REFRESH_ISSUES_NEW_ACCESS_TOKEN = YES/NO
+LOGOUT_CREATES_NEW_SESSION = YES/NO
+
+CLIENT_TOKEN_REMOVED_ON_LOGOUT = YES/NO
+
+ACCESS_TOKEN_FORMAT_CHANGED = YES/NO
+ACCESS_TOKEN_TTL_CHANGED = YES/NO
+JWT_CHANGED = YES/NO
+
+DATABASE_CHANGED = YES/NO
+PRISMA_CHANGED = YES/NO
+LOGIN_CHANGED = YES/NO
+ME_CHANGED = YES/NO
+
+NORMAL_LOGIN = PASS/FAIL
+LOGOUT_FLOW = PASS/FAIL
+REFRESH_FAIL_CLOSED = PASS/FAIL
+
+BUILD = PASS/FAIL
+REPOSITORY_TESTS = PASS/FAIL/NONE
+
+SAFE_TO_COMMIT = YES/NO
+
+SAFE_TO_COMMIT = YES только если:
+
+REAL_REFRESH_TOKEN_EXISTS = NO
+REFRESH_ISSUES_NEW_ACCESS_TOKEN = NO
+CLIENT_TOKEN_REMOVED_ON_LOGOUT = YES
+
+ACCESS_TOKEN_FORMAT_CHANGED = NO
+ACCESS_TOKEN_TTL_CHANGED = NO
+JWT_CHANGED = NO
+DATABASE_CHANGED = NO
+PRISMA_CHANGED = NO
+LOGIN_CHANGED = NO
+ME_CHANGED = NO
+
+NORMAL_LOGIN = PASS
+LOGOUT_FLOW = PASS
+REFRESH_FAIL_CLOSED = PASS
+BUILD = PASS
+
+Если нет:
+SAFE_TO_COMMIT = NO
+и указать только конкретную причину.
+
+НЕ предлагать полноценную refresh-систему.
+НЕ проводить дополнительный аудит.
+НЕ менять ничего за пределами этой задачи.
+НЕ commit.
+НЕ push.
+НЕ deploy.
