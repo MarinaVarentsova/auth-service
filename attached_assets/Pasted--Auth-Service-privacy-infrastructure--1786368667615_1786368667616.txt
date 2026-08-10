@@ -1,0 +1,127 @@
+Работаем ТОЛЬКО в Auth Service.
+
+Исправляем ОДНУ низкорисковую privacy/infrastructure-проблему:
+
+Next.js telemetry явно не отключена.
+
+Нужно отключить Next.js telemetry
+БЕЗ изменения runtime-функционала приложения.
+
+НЕ проводить общий аудит.
+НЕ менять:
+- login;
+- register;
+- verify;
+- logout;
+- refresh;
+- JWT;
+- БД;
+- Prisma;
+- rate limiting;
+- security headers;
+- frontend logic;
+- ENV production values вручную;
+- Docker/Coolify architecture.
+
+НЕ делать commit/push/deploy.
+
+
+==================================================
+1. ОПРЕДЕЛИТЬ ТЕКУЩИЙ BUILD/RUNTIME
+==================================================
+
+Проверить:
+- package.json
+- Dockerfile
+- nixpacks config
+- Coolify build path
+
+и определить минимальный способ
+отключить Next.js telemetry для build/runtime.
+
+
+==================================================
+2. ОТКЛЮЧИТЬ TELEMETRY
+==================================================
+
+Предпочтительно использовать стандартный официальный механизм Next.js:
+
+NEXT_TELEMETRY_DISABLED=1
+
+Добавить его так,
+чтобы telemetry была отключена при production build/runtime.
+
+Не использовать сторонние пакеты.
+Не добавлять сетевые блокировки.
+Не ломать Next.js.
+
+
+==================================================
+3. НЕ МЕНЯТЬ БИЗНЕС-ЛОГИКУ
+==================================================
+
+Не менять никакие API routes.
+
+Не менять responses.
+
+Не менять auth flow.
+
+Не менять пользовательский интерфейс.
+
+
+==================================================
+4. ПРОВЕРКИ
+==================================================
+
+Проверить:
+
+A. npm run build → PASS.
+
+B. Build больше не сообщает,
+что anonymous Next.js telemetry включена,
+либо подтверждено NEXT_TELEMETRY_DISABLED=1.
+
+C. npm start → PASS.
+
+D. Основные routes компилируются.
+
+E. Никакой другой ENV/логика не изменена.
+
+
+==================================================
+5. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть только:
+
+TELEMETRY_BEFORE =
+TELEMETRY_AFTER =
+
+FIX =
+FILES_CHANGED =
+
+NEXT_TELEMETRY_DISABLED = YES/NO
+
+AUTH_LOGIC_CHANGED = YES/NO
+DATABASE_CHANGED = YES/NO
+PRISMA_CHANGED = YES/NO
+RUNTIME_BEHAVIOR_CHANGED = YES/NO
+
+BUILD = PASS/FAIL
+
+SAFE_TO_COMMIT = YES/NO
+
+SAFE_TO_COMMIT = YES только если:
+
+NEXT_TELEMETRY_DISABLED = YES
+AUTH_LOGIC_CHANGED = NO
+DATABASE_CHANGED = NO
+PRISMA_CHANGED = NO
+BUILD = PASS
+
+Не проводить дополнительный аудит.
+Не предлагать улучшения.
+Не менять ничего сверх задачи.
+Не commit.
+Не push.
+Не deploy.
