@@ -1,0 +1,276 @@
+Работаем ТОЛЬКО в Auth Service.
+
+Исправляем ОДНУ проблему:
+
+у полей Auth нет явных ограничений длины.
+
+Общий body limit уже есть и НЕ меняется.
+
+Нужно добавить разумные backend max-length
+на существующие поля login/register/forgot-password,
+НЕ меняя бизнес-логику регистрации и входа.
+
+НЕ проводить общий аудит.
+НЕ менять БД.
+НЕ менять Prisma.
+НЕ менять JWT.
+НЕ менять rate limiting.
+НЕ менять consent.
+НЕ менять verification.
+НЕ менять email flow.
+НЕ менять frontend UI.
+НЕ менять ENV.
+
+НЕ делать commit/push/deploy.
+
+
+==================================================
+1. ОГРАНИЧЕНИЯ
+==================================================
+
+Использовать:
+
+email:
+максимум 254 символа
+
+password:
+максимум 128 символов
+
+full_name:
+максимум 200 символов
+
+phone:
+максимум 32 символа
+
+project_code:
+максимум 100 символов
+
+Применять только там,
+где соответствующее поле реально используется.
+
+
+==================================================
+2. LOGIN
+==================================================
+
+POST /api/auth/login
+
+Проверять до:
+- DB lookup;
+- bcrypt;
+- JWT.
+
+email >254
+или
+password >128
+или
+project_code >100
+
+→ HTTP 400
+
+{
+  "success": false,
+  "error": "Некорректные данные запроса."
+}
+
+Не раскрывать,
+какое именно поле превысило security limit.
+
+
+==================================================
+3. REGISTER
+==================================================
+
+POST /api/auth/register
+
+Проверять после parse body,
+но ДО:
+- bcrypt;
+- transaction;
+- DB;
+- consent create;
+- verification email.
+
+Ограничения:
+
+email <=254
+password <=128
+full_name <=200
+phone <=32
+project_code <=100
+
+Если optional phone отсутствует/null:
+это валидно как раньше.
+
+При превышении:
+
+HTTP 400
+
+{
+  "success": false,
+  "error": "Некорректные данные запроса."
+}
+
+Не менять существующие требования:
+- обязательность полей;
+- consent_personal_data;
+- consent_platform_rules;
+- consent_marketing optional;
+- password rules;
+- duplicate email;
+- transaction.
+
+
+==================================================
+4. FORGOT PASSWORD
+==================================================
+
+POST /api/auth/forgot-password
+
+email <=254
+
+project_code <=100, если используется.
+
+Проверять до DB/email отправки.
+
+При превышении:
+400 + безопасный текст.
+
+
+==================================================
+5. НЕ МЕНЯТЬ PASSWORD POLICY
+==================================================
+
+max length 128 — это только верхняя граница.
+
+Не менять:
+- минимальную длину;
+- требования к символам;
+- hashing;
+- bcrypt rounds;
+- существующие validation messages,
+кроме нового overflow case.
+
+
+==================================================
+6. NORMALIZATION
+==================================================
+
+Существующую нормализацию email сохранить.
+
+Не обрезать длинное значение автоматически.
+
+Если длина превышена:
+отклонить запрос.
+
+Не делать substring/truncate.
+
+
+==================================================
+7. ПРОВЕРКИ
+==================================================
+
+Проверить:
+
+LOGIN:
+email 254 → проходит обычную validation
+email 255 → 400
+password 128 → проходит
+password 129 → 400
+
+REGISTER:
+email 254 → normal flow
+email 255 → 400
+password 128 → normal validation
+password 129 → 400
+full_name 200 → проходит
+full_name 201 → 400
+phone 32 → проходит
+phone 33 → 400
+project_code 100 → проходит
+project_code 101 → 400
+
+При overflow:
+bcrypt / DB / email НЕ вызываются.
+
+FORGOT:
+email 255 → 400
+email send НЕ вызывается.
+
+Проверить:
+normal login
+normal register
+3 auth_consents
+verification email
+forgot-password normal flow
+
+Build/typecheck.
+Repository tests, если есть.
+
+
+==================================================
+8. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть только:
+
+LIMIT_EMAIL =
+LIMIT_PASSWORD =
+LIMIT_FULL_NAME =
+LIMIT_PHONE =
+LIMIT_PROJECT_CODE =
+
+LOGIN_MAX_LENGTH_ACTIVE = YES/NO
+REGISTER_MAX_LENGTH_ACTIVE = YES/NO
+FORGOT_MAX_LENGTH_ACTIVE = YES/NO
+
+OVERFLOW_REACHES_BCRYPT = YES/NO
+OVERFLOW_REACHES_DATABASE = YES/NO
+OVERFLOW_SENDS_EMAIL = YES/NO
+
+REGISTER_BUSINESS_LOGIC_CHANGED = YES/NO
+LOGIN_BUSINESS_LOGIC_CHANGED = YES/NO
+CONSENTS_CHANGED = YES/NO
+DATABASE_CHANGED = YES/NO
+PRISMA_CHANGED = YES/NO
+
+NORMAL_LOGIN = PASS/FAIL
+NORMAL_REGISTER = PASS/FAIL
+NORMAL_FORGOT = PASS/FAIL
+
+BUILD = PASS/FAIL
+REPOSITORY_TESTS = PASS/FAIL/NONE
+
+SAFE_TO_COMMIT = YES/NO
+
+SAFE_TO_COMMIT = YES только если:
+
+LOGIN_MAX_LENGTH_ACTIVE = YES
+REGISTER_MAX_LENGTH_ACTIVE = YES
+FORGOT_MAX_LENGTH_ACTIVE = YES
+
+OVERFLOW_REACHES_BCRYPT = NO
+OVERFLOW_REACHES_DATABASE = NO
+OVERFLOW_SENDS_EMAIL = NO
+
+REGISTER_BUSINESS_LOGIC_CHANGED = NO
+LOGIN_BUSINESS_LOGIC_CHANGED = NO
+CONSENTS_CHANGED = NO
+DATABASE_CHANGED = NO
+PRISMA_CHANGED = NO
+
+NORMAL_LOGIN = PASS
+NORMAL_REGISTER = PASS
+NORMAL_FORGOT = PASS
+BUILD = PASS
+
+Если нет:
+SAFE_TO_COMMIT = NO
+и указать только конкретную причину.
+
+НЕ предлагать дополнительные улучшения.
+НЕ проводить новый аудит.
+НЕ менять ничего сверх задачи.
+НЕ commit.
+НЕ push.
+НЕ deploy.

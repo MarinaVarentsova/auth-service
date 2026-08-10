@@ -102,6 +102,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // ── Field length guard — BEFORE bcrypt / DB / consents / email ──────────
+    // Generic 400 — does not reveal which field exceeded the limit.
+    if (
+      (typeof project_code === "string" && project_code.length > 100) ||
+      (typeof email        === "string" && email.length        > 254) ||
+      (typeof password     === "string" && password.length     > 128) ||
+      (typeof full_name    === "string" && full_name.length    > 200) ||
+      (typeof phone        === "string" && phone.length        >  32)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Некорректные данные запроса." },
+        { status: 400 }
+      );
+    }
+
     const project = await prisma.project.findUnique({
       where: {
         code: project_code as string,

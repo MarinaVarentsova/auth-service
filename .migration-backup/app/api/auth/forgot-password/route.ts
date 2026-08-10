@@ -58,6 +58,18 @@ export async function POST(req: Request) {
       );
     }
 
+    // ── Field length guard — BEFORE DB / email send ──────────────────────────
+    // Generic 400 — does not reveal which field exceeded the limit.
+    if (
+      (typeof project_code === "string" && project_code.length > 100) ||
+      (typeof rawEmail     === "string" && rawEmail.length     > 254)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Некорректные данные запроса." },
+        { status: 400 }
+      );
+    }
+
     stage = "find_project";
     const project = await prisma.project.findUnique({
       where: { code: project_code as string },

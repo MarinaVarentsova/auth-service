@@ -70,6 +70,19 @@ export async function POST(req: Request) {
 
   const { project_code, email, password } = parsed;
 
+  // ── 4a. Field length guard — BEFORE rate-limit gate, DB, bcrypt, JWT ───────
+  // Generic 400 — does not reveal which field exceeded the limit.
+  if (
+    (typeof project_code === "string" && project_code.length > 100) ||
+    (typeof email         === "string" && email.length         > 254) ||
+    (typeof password      === "string" && password.length      > 128)
+  ) {
+    return NextResponse.json(
+      { success: false, error: "Некорректные данные запроса." },
+      { status: 400 }
+    );
+  }
+
   // ── 5. Failed-email gate — BEFORE bcrypt/DB ────────────────────────────────
   // Counts only wrong-password attempts; successful login resets the counter.
   // Protects against targeted password attacks on a known email without
