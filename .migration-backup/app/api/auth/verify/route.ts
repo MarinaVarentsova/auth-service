@@ -68,25 +68,6 @@ export async function GET(req: Request) {
     },
   });
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: verify.userId,
-    },
-    select: {
-      email: true,
-    },
-  });
-
-  if (!user) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "User not found",
-      },
-      { status: 404 }
-    );
-  }
-
   if (!appUrl) {
     return NextResponse.json(
       {
@@ -99,7 +80,8 @@ export async function GET(req: Request) {
 
   const url = new URL("/login", appUrl);
   url.searchParams.set("emailVerified", "1");
-  url.searchParams.set("email", user.email);
+  // Email intentionally omitted from redirect URL — personal data must not
+  // appear in query strings (browser history, server logs, referrer headers).
 
   return NextResponse.redirect(url);
 }

@@ -1,0 +1,240 @@
+Работаем ТОЛЬКО в Auth Service.
+
+Исправляем ОДНУ security/privacy-проблему:
+
+после успешного подтверждения email
+адрес пользователя попадает в URL/query string redirect.
+
+Нужно убрать email из URL,
+НЕ сломав verification flow.
+
+НЕ проводить дополнительный аудит.
+Сразу определить текущую реализацию → исправить → проверить.
+
+НЕ менять:
+- регистрацию;
+- verification token;
+- token hash;
+- TTL;
+- БД;
+- Prisma;
+- auth_consents;
+- login;
+- JWT;
+- AUTH_SECRET;
+- reset-password;
+- rate limiting;
+- UniSender;
+- email template;
+- другие security-проблемы.
+
+НЕ делать commit/push/deploy.
+
+
+==================================================
+1. НАЙТИ ТЕКУЩИЙ VERIFY FLOW
+==================================================
+
+Найти фактический:
+
+/api/auth/verify
+
+и определить:
+
+- как читается verification token;
+- как пользователь подтверждается;
+- куда выполняется redirect после успешного verify;
+- где именно email добавляется в query string;
+- использует ли страница после redirect этот email.
+
+После этого сразу выполнить исправление.
+
+
+==================================================
+2. EMAIL НЕ ДОЛЖЕН ПОПАДАТЬ В URL
+==================================================
+
+После успешного verify URL браузера
+НЕ должен содержать:
+
+email=
+user_email=
+или другое поле с email пользователя.
+
+Если сейчас redirect выглядит примерно:
+
+/verified?email=user@example.com
+
+изменить на безопасный вариант, например:
+
+/verified?status=success
+
+или существующий аналог,
+не содержащий персональные данные.
+
+Не добавлять вместо email:
+- user_id;
+- token;
+- verification token;
+- ФИО;
+- телефон;
+- другие персональные данные.
+
+
+==================================================
+3. СОХРАНИТЬ VERIFY FLOW
+==================================================
+
+Не менять:
+
+- проверку verification token;
+- поиск tokenHash;
+- срок действия;
+- отметку email_verified;
+- удаление/инвалидацию token;
+- transaction, если используется;
+- обработку expired/invalid token.
+
+Успешное подтверждение email должно работать как сейчас.
+
+
+==================================================
+4. VERIFIED PAGE
+==================================================
+
+Проверить страницу,
+на которую пользователь попадает после verify.
+
+Если она использует email только для отображения:
+
+НЕ возвращать email обратно в URL.
+
+Удалить зависимость страницы от query email
+или заменить её безопасным success-state.
+
+Пользователь должен увидеть существующее сообщение
+об успешном подтверждении email.
+
+Не менять дизайн страницы.
+
+
+==================================================
+5. ERROR REDIRECTS
+==================================================
+
+Проверить redirect при:
+
+- invalid token;
+- expired token;
+- уже использованном token;
+- других verify errors.
+
+Email и другие ПД также не должны попадать
+в URL ошибок.
+
+Существующие пользовательские сообщения сохранить,
+если они безопасны.
+
+
+==================================================
+6. ПРОВЕРИТЬ ЛОГИ
+==================================================
+
+Не добавлять логирование email.
+
+Если verification URL / redirect с email
+сейчас явно логируется приложением —
+убрать email из такого лога.
+
+Не менять остальную диагностику.
+
+
+==================================================
+7. ПРОВЕРКИ
+==================================================
+
+Проверить:
+
+A. Валидный verification link
+→ пользователь успешно подтверждается.
+
+B. После verify:
+email_verified устанавливается как раньше.
+
+C. Redirect работает.
+
+D. Итоговый browser URL
+НЕ содержит email.
+
+E. Итоговый browser URL
+НЕ содержит verification token.
+
+F. Verified page показывает success-state.
+
+G. Invalid/expired token flow работает как раньше.
+
+H. Login подтверждённого пользователя работает.
+
+I. build/typecheck.
+
+Если repository tests есть — запустить.
+Если нет — указать NONE.
+
+
+==================================================
+8. ФИНАЛЬНЫЙ ОТЧЁТ
+==================================================
+
+Вернуть ТОЛЬКО:
+
+1. Как выглядел redirect ДО.
+2. Как выглядит redirect ПОСЛЕ.
+3. Использовала ли verified page email.
+4. Какие файлы изменены.
+5. Результаты verification flow.
+6. build/tests.
+
+Флаги:
+
+EMAIL_IN_VERIFY_REDIRECT = YES/NO
+TOKEN_IN_VERIFY_REDIRECT = YES/NO
+
+VERIFY_BUSINESS_LOGIC_CHANGED = YES/NO
+TOKEN_LOGIC_CHANGED = YES/NO
+DATABASE_CHANGED = YES/NO
+PRISMA_CHANGED = YES/NO
+LOGIN_CHANGED = YES/NO
+
+VALID_VERIFY_FLOW = PASS/FAIL
+VERIFIED_PAGE = PASS/FAIL
+INVALID_TOKEN_FLOW = PASS/FAIL
+
+BUILD = PASS/FAIL
+REPOSITORY_TESTS = PASS/FAIL/NONE
+
+SAFE_TO_COMMIT = YES/NO
+
+SAFE_TO_COMMIT = YES только если:
+
+EMAIL_IN_VERIFY_REDIRECT = NO
+TOKEN_IN_VERIFY_REDIRECT = NO
+VERIFY_BUSINESS_LOGIC_CHANGED = NO
+TOKEN_LOGIC_CHANGED = NO
+DATABASE_CHANGED = NO
+PRISMA_CHANGED = NO
+LOGIN_CHANGED = NO
+VALID_VERIFY_FLOW = PASS
+VERIFIED_PAGE = PASS
+INVALID_TOKEN_FLOW = PASS
+BUILD = PASS
+
+Если нет:
+SAFE_TO_COMMIT = NO
+и указать только конкретную причину.
+
+НЕ предлагать дополнительных улучшений.
+НЕ проводить следующий аудит.
+НЕ менять ничего сверх задания.
+НЕ commit.
+НЕ push.
+НЕ deploy.
