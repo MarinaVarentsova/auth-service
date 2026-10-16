@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Local session test bundle
+artifacts/api-server/dist-tests/

@@ -27,6 +27,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      summary: Read-only verification of the current access token
+      description: Checks JWT expiry, user/project membership, verified email and active user/project. Does not rotate or revoke tokens. Access tokens remain valid after logout until expiry (default 15 minutes).
+      security:
+        - sessionBearer: []
+      responses:
+        "200":
+          description: Verified identity; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [authenticated, user]
+                properties:
+                  authenticated:
+                    type: boolean
+                    const: true
+                  user:
+                    type: object
+                    additionalProperties: false
+                    required: [id, projectId, emailVerified]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      projectId:
+                        type: string
+                        format: uuid
+                      emailVerified:
+                        type: boolean
+                        const: true
+        "401":
+          description: Missing, oversized (over 4096 bytes), malformed, invalid or expired Bearer access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Identity is not eligible for access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Verification service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /auth/register:
     post:
       operationId: register
@@ -203,6 +257,11 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
 components:
+  securitySchemes:
+    sessionBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     HealthStatus:
       type: object

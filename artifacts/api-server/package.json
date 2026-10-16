@@ -7,7 +7,8 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/test-auth-session.ps1"
   },
   "dependencies": {
     "@types/bcryptjs": "^3.0.0",
